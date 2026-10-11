@@ -131,6 +131,18 @@ bool VideoDecoder::Initialize(uint32_t width, uint32_t height, protocol::VideoCo
 
     // Low latency mode (Android 11+)
     AMediaFormat_setInt32(format, "low-latency", 1);
+    if (activeCodec_ == protocol::VideoCodec::H264)
+    {
+        // Qualcomm (Quest XR2) decoders ignore "low-latency" for H.264 streams whose VUI lacks
+        // bitstream_restriction and hold a full DPB (~16 frames, ~220 ms at 72 Hz) before
+        // output. These are the vendor keys ALVR sets: emit pictures in decode order and use
+        // the Qualcomm low-latency path. Decoders that do not know a key ignore it.
+        // Decode order equals display order only because the host encoders disable frame
+        // reordering (kVTCompressionPropertyKey_AllowFrameReordering = false).
+        AMediaFormat_setInt32(format, "vendor.qti-ext-dec-picture-order.enable", 1);
+        AMediaFormat_setInt32(format, "vendor.qti-ext-dec-low-latency.enable", 1);
+    }
+    AMediaFormat_setInt32(format, "priority", 0); // realtime
 
     // Configure with the AImageReader's surface as output
     media_status_t status = AMediaCodec_configure(
