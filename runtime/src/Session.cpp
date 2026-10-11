@@ -992,6 +992,17 @@ XrResult Session::CreateSwapchain(const XrSwapchainCreateInfo* createInfo, XrSwa
     {
         return XR_ERROR_VALIDATION_FAILURE;
     }
+    const auto reject = [&](XrResult result) {
+        spdlog::warn("Session: swapchain rejected (XrResult {}) format={} {}x{} array={} faces={} "
+                     "samples={} mips={} usage=0x{:x} create=0x{:x}",
+                     static_cast<int>(result), createInfo->format, createInfo->width,
+                     createInfo->height, createInfo->arraySize, createInfo->faceCount,
+                     createInfo->sampleCount, createInfo->mipCount,
+                     static_cast<uint64_t>(createInfo->usageFlags),
+                     static_cast<uint64_t>(createInfo->createFlags));
+        *swapchain = XR_NULL_HANDLE;
+        return result;
+    };
     if (createInfo->type != XR_TYPE_SWAPCHAIN_CREATE_INFO ||
         createInfo->width == 0 ||
         createInfo->height == 0 ||
@@ -999,13 +1010,11 @@ XrResult Session::CreateSwapchain(const XrSwapchainCreateInfo* createInfo, XrSwa
         createInfo->arraySize == 0 ||
         createInfo->sampleCount != 1)
     {
-        *swapchain = XR_NULL_HANDLE;
-        return XR_ERROR_VALIDATION_FAILURE;
+        return reject(XR_ERROR_VALIDATION_FAILURE);
     }
     if (createInfo->mipCount != 1)
     {
-        *swapchain = XR_NULL_HANDLE;
-        return XR_ERROR_FEATURE_UNSUPPORTED;
+        return reject(XR_ERROR_FEATURE_UNSUPPORTED);
     }
 
     if (teardownStarted_.load(std::memory_order_acquire))
@@ -1018,8 +1027,7 @@ XrResult Session::CreateSwapchain(const XrSwapchainCreateInfo* createInfo, XrSwa
         oxrsys::swapchain::ValidateCreateInfo(graphicsContext_.api, *createInfo);
     if (supportResult != XR_SUCCESS)
     {
-        *swapchain = XR_NULL_HANDLE;
-        return supportResult;
+        return reject(supportResult);
     }
 
     *swapchain = XR_NULL_HANDLE;

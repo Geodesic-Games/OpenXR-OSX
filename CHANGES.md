@@ -71,6 +71,10 @@ This file tracks user-facing, integration-facing, and runtime-relevant changes f
 
 ### Fixed
 
+- Fixed Vulkan apps that render through an sRGB view of a UNORM swapchain image, such as Godot 4,
+  failing at `xrCreateSwapchain` with `XR_ERROR_FEATURE_UNSUPPORTED`. Vulkan swapchains now accept
+  `XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT` and create images with `VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT`.
+  Rejected swapchain requests are now logged with their format, size, and flags.
 - Fixed an `x86_64` runtime under Rosetta silently encoding H.265 on VideoToolbox's software
   encoder (about 20-34 ms per frame, over the 11.1 ms budget at 90 Hz) with nothing in the log to
   say so. H.265 now reaches the hardware encoder through the native `arm64` helper.
