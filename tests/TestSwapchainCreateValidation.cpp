@@ -50,6 +50,17 @@ TEST_CASE("Swapchain usage and creation flags are validated per graphics API",
     createInfo.usageFlags = XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
     CHECK(oxrsys::swapchain::ValidateCreateInfo(GraphicsApi::Metal, createInfo) ==
           XR_ERROR_FEATURE_UNSUPPORTED);
+    // Godot creates UNORM images and renders through an sRGB view of them.
+    createInfo.format = 37;
+    createInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT |
+                            XR_SWAPCHAIN_USAGE_SAMPLED_BIT |
+                            XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
+    CHECK(oxrsys::swapchain::ValidateCreateInfo(GraphicsApi::Vulkan, createInfo) == XR_SUCCESS);
+    createInfo.format = 126;
+    createInfo.usageFlags = XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                            XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
+    CHECK(oxrsys::swapchain::ValidateCreateInfo(GraphicsApi::Vulkan, createInfo) ==
+          XR_ERROR_FEATURE_UNSUPPORTED);
 }
 
 TEST_CASE("Swapchain attachment usage must match the selected format",

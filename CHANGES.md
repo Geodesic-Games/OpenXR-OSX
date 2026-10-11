@@ -71,6 +71,10 @@ This file tracks user-facing, integration-facing, and runtime-relevant changes f
 
 ### Fixed
 
+- Fixed Vulkan apps that render through an sRGB view of a UNORM swapchain image, such as Godot 4,
+  failing at `xrCreateSwapchain` with `XR_ERROR_FEATURE_UNSUPPORTED`. Vulkan swapchains now accept
+  `XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT` and create images with `VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT`.
+  Rejected swapchain requests are now logged with their format, size, and flags.
 - Fixed H.264 streams on Quest holding about 16 frames (around 220 ms at 72 Hz) in the decoder before
   output. The Android VR client now sets the Qualcomm decode-order and low-latency MediaCodec keys,
   which brings H.264 decode on Quest 3 to about 11 ms.
