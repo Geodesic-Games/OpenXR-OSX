@@ -3644,6 +3644,13 @@ void XrApp::RunFrame()
                  clientRefreshRateHz_,
                  frameRefreshRateHz);
             clientRefreshRateHz_ = frameRefreshRateHz;
+
+            // The display often settles on the requested rate only after ClientConnect has gone
+            // out; report the new rate so the server paces the application to what is shown
+            if (IsConnected() && serverIp_[0] != '\0')
+            {
+                SendClientConnect(serverIp_);
+            }
         }
     }
 
