@@ -119,6 +119,8 @@ private:
     XrResult ValidateProjectionLayer(const XrCompositionLayerProjection& layer,
                                      FrameSource& frameSource) const;
     XrResult ValidateQuadLayer(const XrCompositionLayerQuad& layer) const;
+    // World-space head pose a projection layer was rendered with, from its two submitted view poses
+    bool ProjectionLayerHeadPose(const XrCompositionLayerProjection& layer, XrPosef& outHeadPose) const;
 
     uint64_t handle_ = 0;
     Instance* instance_;

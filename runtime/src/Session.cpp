@@ -636,6 +636,11 @@ XrResult Session::EndFrame(const XrFrameEndInfo* frameEndInfo)
         frameEndInfo->environmentBlendMode == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND;
     bool sourceAlphaProjectionLayer = false;
 
+    // The head pose the first projection layer was rendered with, from the view poses the
+    // application submits with it
+    XrPosef layerRenderHeadPose = {{0, 0, 0, 1}, {0, 0, 0}};
+    bool hasLayerRenderPose = false;
+
     FrameSource frameSource = {};
 
     for (uint32_t i = 0; i < frameEndInfo->layerCount; i++)
@@ -662,6 +667,11 @@ XrResult Session::EndFrame(const XrFrameEndInfo* frameEndInfo)
                 if (result != XR_SUCCESS)
                 {
                     return result;
+                }
+
+                if (!hasLayerRenderPose)
+                {
+                    hasLayerRenderPose = ProjectionLayerHeadPose(projectionLayer, layerRenderHeadPose);
                 }
                 break;
             }
@@ -696,14 +706,18 @@ XrResult Session::EndFrame(const XrFrameEndInfo* frameEndInfo)
     if (streamingServer_ && streamingServer_->IsClientConnected())
     {
         auto sendStart = Clock::now();
-        if (lastRenderHasPose_)
+        // Applications that pipeline frames, such as Unreal, locate views for the next frame before
+        // submitting this one, so the most recent xrLocateViews pose can be later than the one these
+        // pixels were drawn with; the submitted layer's own pose always matches them
+        if (hasLayerRenderPose || lastRenderHasPose_)
         {
+            const XrPosef& renderHeadPose = hasLayerRenderPose ? layerRenderHeadPose : lastRenderHeadPose_;
             const float renderHeadOrientation[4] = {
-                lastRenderHeadPose_.orientation.x, lastRenderHeadPose_.orientation.y,
-                lastRenderHeadPose_.orientation.z, lastRenderHeadPose_.orientation.w};
+                renderHeadPose.orientation.x, renderHeadPose.orientation.y,
+                renderHeadPose.orientation.z, renderHeadPose.orientation.w};
             const float renderHeadPosition[3] = {
-                lastRenderHeadPose_.position.x, lastRenderHeadPose_.position.y,
-                lastRenderHeadPose_.position.z};
+                renderHeadPose.position.x, renderHeadPose.position.y,
+                renderHeadPose.position.z};
             streamingServer_->SendFrame(std::move(frameSource), renderHeadOrientation,
                                         renderHeadPosition);
         }
@@ -833,6 +847,31 @@ XrResult Session::ValidateProjectionLayer(const XrCompositionLayerProjection& la
     }
 
     return XR_SUCCESS;
+}
+
+bool Session::ProjectionLayerHeadPose(const XrCompositionLayerProjection& layer, XrPosef& outHeadPose) const
+{
+    if (layer.viewCount < 2 || layer.views == nullptr || !inputManager_)
+    {
+        return false;
+    }
+    auto* space = Runtime::Get().FromHandle<Space>(reinterpret_cast<uint64_t>(layer.space));
+    if (space == nullptr || space->GetSession() != this)
+    {
+        return false;
+    }
+
+    // The inverse of LocateViews: from the layer's space back to STAGE-absolute world space,
+    // where the eyes sit half the IPD either side of the head and share its orientation
+    const XrPosef basePose = ReferenceSpaceWorldPose(space, *inputManager_);
+    const glm::quat baseRot = ToGlmQuat(basePose.orientation);
+    const glm::vec3 basePos = ToGlmVec(basePose.position);
+    const glm::vec3 leftEye = baseRot * ToGlmVec(layer.views[0].pose.position) + basePos;
+    const glm::vec3 rightEye = baseRot * ToGlmVec(layer.views[1].pose.position) + basePos;
+
+    outHeadPose.orientation = ToXrQuat(glm::normalize(baseRot * ToGlmQuat(layer.views[0].pose.orientation)));
+    outHeadPose.position = ToXrVec((leftEye + rightEye) * 0.5f);
+    return true;
 }
 
 XrResult Session::ValidateQuadLayer(const XrCompositionLayerQuad& layer) const
