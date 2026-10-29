@@ -9,6 +9,7 @@
 #include <mutex>
 #include <thread>
 
+#include "HeadsetFramePacing.h"
 #include "RuntimeSockets.h"
 
 #include <oxrsys/protocol/Protocol.h>
@@ -43,6 +44,10 @@ public:
     void SetPredictionHorizonMs(float predictionHorizonMs);
     float GetPredictionHorizonMs() const { return predictionHorizonMs_.load(); }
 
+    // When the headset's latest frame went out, on this machine's steady clock, while its
+    // tracking packets keep arriving (thread-safe)
+    bool GetHeadsetFrameTime(int64_t nowNs, int64_t& outTimeNs) const;
+
     // Check if we're receiving tracking data
     bool IsReceiving() const { return hasData_.load(); }
     bool IsRunning() const { return running_.load(); }
@@ -71,6 +76,7 @@ private:
     mutable std::mutex poseMutex_;
     oxr::protocol::TrackingPacket latestPacket_ = {};
     std::deque<HistorySample> history_;
+    oxrsys::HeadsetDisplayClock displayClock_;
     std::atomic<float> predictionHorizonMs_{0.0f};
     mutable std::atomic<int64_t> lastPredictionDiagnosticNs_{0};
 

@@ -89,6 +89,11 @@ public:
     // Access to tracking receiver (for InputManager integration)
     TrackingReceiver* GetTrackingReceiver() { return trackingReceiver_.get(); }
 
+    // How many frame reports the headset has sent, about one a second, and how many stale
+    // frames it showed in the latest one
+    uint64_t GetClientReportCount() const { return clientReportCount_.load(); }
+    uint32_t GetClientStaleFrames() const { return clientStaleFrameReusesDelta_.load(); }
+
 private:
     using SocketHandle = oxrsys::runtime_socket::SocketHandle;
 
@@ -244,6 +249,7 @@ private:
     std::atomic<float> clientDisplayedFrameAgeMs_{0.0f};
     std::atomic<uint32_t> clientReprojectedFramesDelta_{0};
     std::atomic<uint32_t> clientStaleFrameReusesDelta_{0};
+    std::atomic<uint64_t> clientReportCount_{0};
     std::atomic<uint32_t> clientRenderPoseFallbacksDelta_{0};
     std::atomic<oxr::protocol::ClientReprojectionMode> clientReprojectionMode_{
         oxr::protocol::ClientReprojectionMode::Off};

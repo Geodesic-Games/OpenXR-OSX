@@ -174,6 +174,7 @@ add_executable(oxrsys_runtime_tests
     tests/TestConfig.cpp
     tests/TestEncoderHelperIpc.cpp
     tests/TestEncoderPathPolicy.cpp
+    tests/TestHeadsetFramePacing.cpp
     tests/TestInputManager.cpp
     tests/TestRuntimePlatform.cpp
     tests/TestStreamingAbr.cpp

@@ -4,6 +4,7 @@
 
 #include <openxr/openxr.h>
 #include "GraphicsTypes.h"
+#include "HeadsetFramePacing.h"
 #include <memory>
 #include <vector>
 #include <chrono>
@@ -159,6 +160,12 @@ private:
     // overshoot does not accumulate into phase drift / a slow beat against the panel.
     std::chrono::steady_clock::time_point nextFrameDeadline_{};
     std::chrono::nanoseconds pacingPeriod_{0};
+
+    // While a headset streams, the grid follows its display instead (see HeadsetFramePacing.h)
+    void LockFrameDeadlineToHeadset(std::chrono::steady_clock::time_point now);
+    bool lockedToHeadset_ = false;
+    oxrsys::HeadsetPhaseState headsetPhase_ = {};
+    std::chrono::nanoseconds longestFrameSinceReport_{0};
 
     std::vector<DebugUtilsLabelState> debugUtilsLabelRegions_;
     std::optional<DebugUtilsLabelState> debugUtilsInsertedLabel_;

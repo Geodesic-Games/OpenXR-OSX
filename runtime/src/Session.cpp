@@ -10,6 +10,7 @@
 #include "Space.h"
 #include "InputManager.h"
 #include "StreamingServer.h"
+#include "TrackingReceiver.h"
 #include <spdlog/spdlog.h>
 #include <algorithm>
 #include <atomic>
@@ -492,6 +493,7 @@ XrResult Session::WaitFrame(const XrFrameWaitInfo* frameWaitInfo, XrFrameState* 
     }
     else
     {
+        LockFrameDeadlineToHeadset(now);
         if (now < nextFrameDeadline_)
         {
             std::this_thread::sleep_until(nextFrameDeadline_);
@@ -517,6 +519,9 @@ XrResult Session::WaitFrame(const XrFrameWaitInfo* frameWaitInfo, XrFrameState* 
         if (lastFrameTime_ != startTime_)
         {
             intervalSamplesMs.push_back(intervalMs);
+            longestFrameSinceReport_ = std::max(
+                longestFrameSinceReport_,
+                std::chrono::duration_cast<std::chrono::nanoseconds>(now - lastFrameTime_));
         }
         if (now - lastPacingLog >= std::chrono::seconds(1) && !intervalSamplesMs.empty())
         {
@@ -528,10 +533,12 @@ XrResult Session::WaitFrame(const XrFrameWaitInfo* frameWaitInfo, XrFrameState* 
             double stddev = std::sqrt(variance);
             auto mm = std::minmax_element(intervalSamplesMs.begin(), intervalSamplesMs.end());
             spdlog::info("OXRSys: Session::WaitFrame pacing target={}Hz ({:.2f}ms) "
-                         "actual mean={:.2f}ms stddev={:.2f}ms min/max={:.2f}/{:.2f}ms (n={})",
+                         "actual mean={:.2f}ms stddev={:.2f}ms min/max={:.2f}/{:.2f}ms (n={}) "
+                         "headset_locked={} phase={:.2f}ms",
                          targetRefreshHz,
                          std::chrono::duration<double, std::milli>(targetFrameTime).count(),
-                         mean, stddev, *mm.first, *mm.second, intervalSamplesMs.size());
+                         mean, stddev, *mm.first, *mm.second, intervalSamplesMs.size(),
+                         lockedToHeadset_, headsetPhase_.phaseOffsetNs / 1.0e6);
             intervalSamplesMs.clear();
             lastPacingLog = now;
         }
@@ -560,6 +567,51 @@ XrResult Session::WaitFrame(const XrFrameWaitInfo* frameWaitInfo, XrFrameState* 
     }
 
     return XR_SUCCESS;
+}
+
+void Session::LockFrameDeadlineToHeadset(std::chrono::steady_clock::time_point now)
+{
+    TrackingReceiver* tracking = streamingServer_ != nullptr && streamingServer_->IsClientConnected()
+                                     ? streamingServer_->GetTrackingReceiver()
+                                     : nullptr;
+    const int64_t nowNs =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+    int64_t headsetFrameTimeNs = 0;
+    const bool locked = tracking != nullptr && tracking->GetHeadsetFrameTime(nowNs, headsetFrameTimeNs);
+    if (locked != lockedToHeadset_)
+    {
+        lockedToHeadset_ = locked;
+        spdlog::info(locked ? "OXRSys: frames follow the headset's display"
+                            : "OXRSys: no headset frames, frames follow the runtime's own timer");
+    }
+    if (!locked)
+    {
+        return;
+    }
+
+    const int64_t periodNs = pacingPeriod_.count();
+    const uint64_t reportCount = streamingServer_->GetClientReportCount();
+    if (reportCount != headsetPhase_.lastReportCount)
+    {
+        const uint32_t staleFrames = streamingServer_->GetClientStaleFrames();
+        const bool appKeptUp = longestFrameSinceReport_ < pacingPeriod_ * 5 / 4;
+        if (oxrsys::UpdateHeadsetPhase(headsetPhase_, reportCount, staleFrames, appKeptUp, periodNs))
+        {
+            spdlog::info("OXRSys: headset showed {} stale frames in its second report in a row; "
+                         "frames move half a period, to {:.2f}ms after its frames",
+                         staleFrames, headsetPhase_.phaseOffsetNs / 1.0e6);
+        }
+        longestFrameSinceReport_ = std::chrono::nanoseconds(0);
+    }
+
+    // nextFrameDeadline_ is one period past the deadline the previous frame waited for
+    const int64_t previousDeadlineNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        (nextFrameDeadline_ - pacingPeriod_).time_since_epoch()).count();
+    const int64_t deadlineNs = oxrsys::NextHeadsetLockedDeadline(
+        headsetFrameTimeNs, headsetPhase_.phaseOffsetNs, periodNs, previousDeadlineNs);
+    nextFrameDeadline_ = std::chrono::steady_clock::time_point(
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::nanoseconds(deadlineNs)));
 }
 
 XrResult Session::BeginFrame(const XrFrameBeginInfo* frameBeginInfo)

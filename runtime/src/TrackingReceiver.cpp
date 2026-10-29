@@ -463,8 +463,21 @@ void TrackingReceiver::StorePacket(const oxr::protocol::TrackingPacket& packet, 
         {
             history_.pop_front();
         }
+        if (packet.timestampNs > 0)
+        {
+            displayClock_.AddSample(receiveTimeNs, packet.timestampNs);
+        }
     }
 
     hasData_.store(true);
     packetCount_.fetch_add(1);
+}
+
+bool TrackingReceiver::GetHeadsetFrameTime(int64_t nowNs, int64_t& outTimeNs) const
+{
+    // Seven headset frames at 72 Hz without a packet means the stream stalled
+    constexpr int64_t kMaxPacketAgeNs = 100'000'000;
+
+    std::lock_guard<std::mutex> lock(poseMutex_);
+    return displayClock_.GetLatestFrameTime(nowNs, kMaxPacketAgeNs, outTimeNs);
 }

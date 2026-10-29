@@ -2200,6 +2200,7 @@ void StreamingServer::HandleLatencyReport(const oxr::protocol::LatencyReport& re
     clientStaleFrameReusesDelta_.store(report.staleFrameReuses);
     clientRenderPoseFallbacksDelta_.store(report.renderPoseFallbacks);
     clientReprojectionMode_.store(report.reprojectionMode);
+    clientReportCount_.fetch_add(1);
 
     float previous = clientPipelineLatencyMs_.load();
     float smoothed = previous * 0.8f + report.totalClientLatencyMs * 0.2f;
