@@ -76,7 +76,8 @@ encoder_helper = "auto"
 encoder_helper_path = ""
 
 # Streaming transport: "auto" tries USB ADB reverse and WiFi, "wifi" disables USB TCP
-# listeners, and "usb_adb" disables WiFi discovery fallback.
+# listeners, and "usb_adb" disables WiFi discovery fallback. OXRSYS_TRANSPORT in an
+# app's environment overrides this for that app.
 transport = "auto"
 
 # Server-side foveated video encoding preset: "off", "light", "medium", or "high".

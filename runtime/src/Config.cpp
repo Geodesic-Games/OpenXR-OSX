@@ -262,6 +262,11 @@ static bool IsSupportedRefreshRate(uint32_t value)
     return value == 60 || value == 72 || value == 80 || value == 90 || value == 120;
 }
 
+static bool IsSupportedStreamingTransport(const std::string& value)
+{
+    return value == "auto" || value == "wifi" || value == "usb_adb";
+}
+
 static std::string ParseString(std::string value)
 {
     value = Trim(value);
@@ -422,7 +427,7 @@ ConfigValues ParseConfigToml(std::istream& input, const ConfigValues& defaults)
             else if (key == "transport")
             {
                 value = ParseString(value);
-                if (value == "auto" || value == "wifi" || value == "usb_adb")
+                if (IsSupportedStreamingTransport(value))
                 {
                     values.streamingTransport = value;
                 }
@@ -600,6 +605,15 @@ bool Config::ReloadIfChangedLocked(bool force)
         {
             newValues = ParseConfigToml(file);
         }
+    }
+
+    // A launcher that has set up adb reverse for the cable can insist on it for this app.
+    // Under "auto", WiFi discovery sometimes reaches the headset first, and a WiFi stream
+    // drops frames where the cable wouldn't.
+    if (const char* transport = std::getenv("OXRSYS_TRANSPORT");
+        transport != nullptr && IsSupportedStreamingTransport(transport))
+    {
+        newValues.streamingTransport = transport;
     }
 
     values_ = newValues;
