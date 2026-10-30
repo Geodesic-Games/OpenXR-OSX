@@ -71,6 +71,11 @@ This file tracks user-facing, integration-facing, and runtime-relevant changes f
 
 ### Fixed
 
+- Fixed boolean actions bound to an identifier without a component, such as
+  `/user/hand/left/input/trigger`, never turning on. They now read the identifier's click, which for
+  the trigger and squeeze thresholds the value, and float actions read its value. Unreal binds its
+  Oculus Touch trigger and grip press keys this way, so menus, selection and grabbing in its editor
+  VR Mode never responded.
 - Fixed Vulkan apps that render through an sRGB view of a UNORM swapchain image, such as Godot 4,
   failing at `xrCreateSwapchain` with `XR_ERROR_FEATURE_UNSUPPORTED`. Vulkan swapchains now accept
   `XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT` and create images with `VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT`.

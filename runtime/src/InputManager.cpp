@@ -748,6 +748,14 @@ bool InputManager::GetButtonClick(Hand hand, const std::string& componentPath) c
         return boolIt->second;
     }
 
+    // A binding to an identifier without a component, such as .../input/trigger, reads its click.
+    // Unreal binds its Oculus Touch trigger and grip press keys this way, since that profile has no
+    // click for either, and the trigger and squeeze clicks below threshold their values.
+    if (componentPath.find('/') == std::string::npos)
+    {
+        return GetButtonClick(hand, componentPath + "/click");
+    }
+
     if (componentPath == "menu/click")
     {
         return GetMenuClick();
@@ -891,11 +899,13 @@ float InputManager::GetFloatComponentForProfile(Hand hand, const std::string& co
     {
         return GetTriggerValue(hand);
     }
-    if (componentPath == "trigger/value")
+    // An identifier without a component reads its value, and one without a value, such as a face
+    // button, falls through to its click below
+    if (componentPath == "trigger/value" || componentPath == "trigger")
     {
         return GetTriggerValue(hand);
     }
-    if (componentPath == "squeeze/value")
+    if (componentPath == "squeeze/value" || componentPath == "squeeze")
     {
         return GetGrabValue(hand);
     }

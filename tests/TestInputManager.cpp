@@ -433,6 +433,34 @@ TEST_CASE("InputManager — select follows trigger and squeeze follows grab", "[
     CHECK_FALSE(im.GetButtonClick(InputManager::Hand::Left, "squeeze/click"));
 }
 
+TEST_CASE("InputManager - identifier-only paths read the click or the value", "[input]")
+{
+    InputManager im;
+    TrackingReceiver receiver;
+    im.SetTrackingReceiver(&receiver);
+    im.SetStreamingClientName("Oculus Quest");
+
+    oxr::protocol::TrackingPacket packet = {};
+    packet.timestampNs = 1'000'000'000;
+    packet.headOrientation[3] = 1.0f;
+    packet.trackingFlags = oxr::protocol::TRACKING_FLAG_LEFT_CONTROLLER_ACTIVE;
+    packet.leftControllerRot[3] = 1.0f;
+    packet.buttonState = oxr::protocol::BUTTON_X;
+    packet.leftTrigger = 0.75f;
+    packet.leftGrip = 0.20f;
+    receiver.InjectPacket(reinterpret_cast<const uint8_t*>(&packet), sizeof(packet));
+    im.Update(0.0f);
+
+    // Unreal binds its Oculus Touch trigger and grip press keys to .../input/trigger and .../input/squeeze
+    CHECK(im.GetButtonClick(InputManager::Hand::Left, "trigger"));
+    CHECK_FALSE(im.GetButtonClick(InputManager::Hand::Left, "squeeze"));
+    CHECK(im.GetButtonClick(InputManager::Hand::Left, "x"));
+    CHECK_FALSE(im.GetButtonClick(InputManager::Hand::Left, "y"));
+    CHECK_THAT(im.GetFloatComponent(InputManager::Hand::Left, "trigger"), WithinAbs(0.75f, 0.001f));
+    CHECK_THAT(im.GetFloatComponent(InputManager::Hand::Left, "squeeze"), WithinAbs(0.20f, 0.001f));
+    CHECK_THAT(im.GetFloatComponent(InputManager::Hand::Left, "x"), WithinAbs(1.0f, 0.001f));
+}
+
 TEST_CASE("TrackingReceiver — predicted pose extrapolates recent motion", "[input]")
 {
     TrackingReceiver receiver;

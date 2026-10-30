@@ -203,7 +203,7 @@ The client suggests bindings for:
 - PICO Neo3
 - PICO 4
 
-Unsupported profile suggestions are logged and ignored so the active headset runtime can select the profile it actually exposes. The macOS runtime maps the connected `ClientConnect.deviceName` to the matching canonical OpenXR profile and accepts compatible fallback bindings such as Oculus Touch for Quest and Khronos simple controller where appropriate.
+Unsupported profile suggestions are logged and ignored so the active headset runtime can select the profile it actually exposes. The macOS runtime maps the connected `ClientConnect.deviceName` to the matching canonical OpenXR profile and accepts compatible fallback bindings such as Oculus Touch for Quest and Khronos simple controller where appropriate. A binding to an identifier without a component, such as `/user/hand/left/input/trigger`, reads the component the action type expects: boolean actions read its click, with the trigger and squeeze thresholded at 0.5, and float actions read its value.
 When announced by the headset runtime, the Android client also enables `XR_META_touch_controller_plus` and `XR_BD_controller_interaction` before suggesting those profile families.
 
 Expected Quest profile paths are `/interaction_profiles/oculus/touch_controller` or `/interaction_profiles/meta/touch_controller_quest_1_rift_s` for Quest 1, `/interaction_profiles/meta/touch_controller_quest_2` for Quest 2, and `/interaction_profiles/meta/touch_plus_controller` or `/interaction_profiles/meta/touch_controller_plus` for Quest 3-class Touch Plus controllers.
