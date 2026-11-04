@@ -31,6 +31,10 @@ void ShutdownAndClose(SocketHandle& socket);
 bool SetReuseAddress(SocketHandle socket);
 bool SetBroadcast(SocketHandle socket);
 bool SetSendBuffer(SocketHandle socket, int bytes);
+// -1 when the socket can't tell
+int GetSendBufferSize(SocketHandle socket);
+// Bytes written to a stream socket that it hasn't sent yet; -1 when the socket can't tell
+int GetQueuedSendBytes(SocketHandle socket);
 bool SetReceiveTimeout(SocketHandle socket, long seconds, long microseconds);
 bool SetSendTimeout(SocketHandle socket, long seconds, long microseconds);
 bool SetTcpNoDelay(SocketHandle socket);

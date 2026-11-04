@@ -24,6 +24,7 @@ trademarks referenced by this project.
 - WiFi UDP and reconnecting USB ADB reverse TCP transport
 - SDK-free native ADB setup in OXRSys Home, with local ADB server and external `adb` fallbacks
 - Quest controller, hand tracking, reprojection, passthrough, foveation, and ABR paths
+- the Mac's sound in Quest headsets over USB, from the OpenXR app alone or from every app
 - native visionOS immersive viewer with resilient compositor-frame submission, automatic and
   direct-IP discovery, hand tracking, and accessory-controller tracking
 - shared Swift streaming and simulator packages for macOS, iOS, and visionOS clients

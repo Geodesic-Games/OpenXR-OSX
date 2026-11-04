@@ -174,6 +174,7 @@ add_executable(oxrsys_runtime_tests
     tests/TestConfig.cpp
     tests/TestEncoderHelperIpc.cpp
     tests/TestEncoderPathPolicy.cpp
+    tests/TestHeadsetAudio.cpp
     tests/TestHeadsetFramePacing.cpp
     tests/TestInputManager.cpp
     tests/TestRuntimePlatform.cpp
@@ -189,6 +190,7 @@ add_executable(oxrsys_runtime_tests
     tests/TestProtocolLayout.cpp
     tests/TestQuestPassthroughAlphaPolicy.cpp
     tests/TestQuestShellInteraction.cpp
+    clients/android-vr/app/src/main/cpp/HeadsetAudioBuffer.cpp
     clients/android-vr/app/src/main/cpp/QuestPassthroughAlphaPolicy.cpp
     clients/android-vr/app/src/main/cpp/QuestShellInteraction.cpp
     runtime/src/InputManager.cpp
@@ -353,6 +355,30 @@ set_tests_properties(oxrsys_videotoolbox_encoder_tests PROPERTIES
     TIMEOUT 60
 )
 list(APPEND OXRSYS_RUNTIME_TEST_TARGETS oxrsys_videotoolbox_encoder_tests)
+
+# Taps this process's own quiet test tone through Core Audio
+add_executable(oxrsys_headset_audio_capture_tests
+    tests/TestHeadsetAudioCapture.mm
+    runtime/src/HeadsetAudioCapture.mm
+)
+target_include_directories(oxrsys_headset_audio_capture_tests PRIVATE
+    runtime/src
+)
+target_link_libraries(oxrsys_headset_audio_capture_tests PRIVATE
+    Catch2::Catch2WithMain
+    spdlog::spdlog
+    "-framework Foundation"
+    "-framework CoreAudio"
+    "-framework AudioToolbox"
+)
+add_test(NAME oxrsys_headset_audio_capture_tests
+    COMMAND oxrsys_headset_audio_capture_tests
+)
+set_tests_properties(oxrsys_headset_audio_capture_tests PROPERTIES
+    ENVIRONMENT "${OXRSYS_ISOLATED_TEST_ENV}"
+    TIMEOUT 30
+)
+list(APPEND OXRSYS_RUNTIME_TEST_TARGETS oxrsys_headset_audio_capture_tests)
 
 add_dependencies(oxrsys_runtime_sync_compile_commands
     ${OXRSYS_RUNTIME_TEST_TARGETS}

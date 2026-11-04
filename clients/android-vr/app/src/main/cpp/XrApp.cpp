@@ -25,6 +25,7 @@
 #include <GLES2/gl2ext.h>
 #include <openxr/openxr_platform.h>
 #include <oxrsys/protocol/Foveation.h>
+#include <oxrsys/protocol/HeadsetAudio.h>
 
 #define LOG_TAG "OXRSys-Android"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -2183,6 +2184,7 @@ void XrApp::ResetConnection(const char* reason)
 {
     LOGI("Resetting connection: %s", reason != nullptr ? reason : "unspecified");
     StopControlReceiver();
+    headsetAudioPlayer_.reset();
     StopStreamConfigWorker();
     CloseControlSocket();
     CloseSpatialSocket();
@@ -2664,7 +2666,7 @@ void XrApp::ConfigureServerConnection(const protocol::ServerAnnounce& server,
         foveationEyeHeightRatio_ = 1.0f;
     }
 
-    LOGI("Server stream options: features=0x%x ffe=%d ffr=%s(%u) upscaling=%d reprojection=%s passthrough=%d spatialPort=%u activeRatio=%.4fx%.4f",
+    LOGI("Server stream options: features=0x%x ffe=%d ffr=%s(%u) upscaling=%d reprojection=%s passthrough=%d audio=%d spatialPort=%u activeRatio=%.4fx%.4f",
          server.serverFeatures,
          serverFoveatedEncodingEnabled_ ? 1 : 0,
          clientFoveationOverride ? "override" : "auto",
@@ -2672,6 +2674,7 @@ void XrApp::ConfigureServerConnection(const protocol::ServerAnnounce& server,
          clientUpscalingEnabled_ ? 1 : 0,
          ReprojectionModeName(clientReprojectionMode_),
          serverMixedRealityPassthroughEnabled_ ? 1 : 0,
+         (server.serverFeatures & protocol::SERVER_FEATURE_HEADSET_AUDIO) != 0 ? 1 : 0,
          serverSpatialPort_,
          foveationEyeWidthRatio_,
          foveationEyeHeightRatio_);
@@ -2806,6 +2809,11 @@ void XrApp::SendClientConnect(const char* serverIp)
     {
         connect.clientCapabilities |= protocol::CLIENT_CAPABILITY_MIXED_REALITY_PASSTHROUGH;
     }
+    if (usbAdb)
+    {
+        // The Mac's sound arrives as Audio records on the USB control connection
+        connect.clientCapabilities |= protocol::CLIENT_CAPABILITY_AUDIO_OUTPUT;
+    }
     connect.audioSampleRateHz = 48000;
     strncpy(connect.deviceName, headsetSystemName_, sizeof(connect.deviceName) - 1);
     connect.deviceName[sizeof(connect.deviceName) - 1] = '\0';
@@ -2898,6 +2906,10 @@ void XrApp::ControlReceiveThreadMain()
             {
                 HandleControlPayload(payload.data(), payload.size());
             }
+            else if (header.type == protocol::TcpRecordType::Audio)
+            {
+                PlayHeadsetAudio(payload);
+            }
             else if (header.type == protocol::TcpRecordType::Disconnect)
             {
                 OnConnectionLost("server disconnected");
@@ -2925,6 +2937,21 @@ void XrApp::ControlReceiveThreadMain()
         }
         HandleControlPayload(buffer, static_cast<size_t>(received));
     }
+}
+
+void XrApp::PlayHeadsetAudio(const std::vector<uint8_t>& payload)
+{
+    protocol::TcpAudioHeader header = {};
+    const uint8_t* sampleBytes = nullptr;
+    if (!protocol::ReadHeadsetAudioRecord(payload.data(), payload.size(), header, sampleBytes))
+    {
+        return;
+    }
+    if (!headsetAudioPlayer_)
+    {
+        headsetAudioPlayer_ = std::make_unique<HeadsetAudioPlayer>();
+    }
+    headsetAudioPlayer_->Play(header.sampleRateHz, header.channels, sampleBytes, header.frameCount);
 }
 
 void XrApp::HandleControlPayload(const uint8_t* data, size_t size)

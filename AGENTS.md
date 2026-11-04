@@ -139,8 +139,14 @@ As of March 17, 2026, the pinned non-interactive OpenXR-CTS baseline is green lo
 - Keep `passthrough_enabled`, `passthrough_supported`, and `passthrough_ready` distinct. Application
   alpha blending is a separate restart-bound opt-in; ordinary dark pixels are never transparent by
   default.
-- Headset audio remains protocol/config scaffolding. Do not advertise the server audio feature
-  until capture and playback are implemented.
+- Headset audio goes only to USB clients that advertise `CLIENT_CAPABILITY_AUDIO_OUTPUT`, as
+  `Audio` records on the USB control connection. The headset-audio thread owns the Core Audio tap;
+  connects, disconnects, `Session::EndFrame()`, and VideoToolbox callbacks never start, stop, or
+  wait on it. Sends are non-blocking, bounded, and latest-first, and a record goes out whole or not
+  at all. Every write to the USB control socket holds `tcpControlSendMutex_`, taken before
+  `tcpSocketMutex_`.
+- Create a tap that mutes the Mac only after an unmuted tap has delivered real sound. Without the
+  recording permission macOS hands a tap silence, but a muting tap still silences the Mac.
 - `xrLocateSpacesKHR` remains accepted as the alias of OpenXR 1.1 `xrLocateSpaces`.
 - Reference spaces currently enumerate `VIEW`, `LOCAL`, `LOCAL_FLOOR`, and `STAGE`.
 

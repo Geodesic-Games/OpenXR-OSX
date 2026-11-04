@@ -31,6 +31,12 @@ TEST_CASE("C++ protocol layouts match the documented wire format", "[protocol]")
     STATIC_REQUIRE(sizeof(TcpVideoNalHeader) == 24);
     STATIC_REQUIRE(sizeof(TcpRenderPose) == 48);
     STATIC_REQUIRE(sizeof(TcpAudioHeader) == 24);
+    STATIC_REQUIRE(offsetof(TcpAudioHeader, sampleRateHz) == 16);
+    STATIC_REQUIRE(offsetof(TcpAudioHeader, format) == 22);
+    STATIC_REQUIRE(static_cast<uint16_t>(AudioSampleFormat::Int16) == 2);
+    STATIC_REQUIRE(static_cast<uint16_t>(TcpRecordType::Audio) == 0x0008);
+    STATIC_REQUIRE(SERVER_FEATURE_HEADSET_AUDIO == 0x00000008);
+    STATIC_REQUIRE(CLIENT_CAPABILITY_AUDIO_OUTPUT == 0x00000008);
     STATIC_REQUIRE(sizeof(AudioPacketHeader) == 32);
     STATIC_REQUIRE(TCP_RECORD_MAGIC == 0x4f585255);
     STATIC_REQUIRE(STREAMING_MIN_BITRATE_MBPS == 1);

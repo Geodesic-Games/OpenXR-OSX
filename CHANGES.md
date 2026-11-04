@@ -37,6 +37,13 @@ This file tracks user-facing, integration-facing, and runtime-relevant changes f
   runtime's compose IOSurfaces, shared zero-copy as Mach send rights, and returns Annex-B NAL units
   over a versioned Unix-socket protocol. It is built with the runtime, is always `arm64`, and ships
   next to the runtime dylib in every package, universal and `x86_64` included.
+- Added headset audio over USB: with `streaming.headset_audio = true` (macOS 14.2 or later), a Quest
+  plays the Mac's sound instead of the Mac. A Core Audio process tap records the OpenXR app's own
+  sound, or every app's with `streaming.headset_audio_source = "system"`, and the runtime sends it as
+  16-bit PCM `Audio` records on the USB control connection to clients that advertise
+  `CLIENT_CAPABILITY_AUDIO_OUTPUT`. The Android client plays them through a low-latency AAudio stream
+  with a small adaptive jitter cushion. The Mac goes quiet only once the tap has received real sound,
+  so a missing recording permission never silences both.
 - Added `streaming.encoder_helper = "auto" | "true" | "false"` (default `"auto"`) and
   `streaming.encoder_helper_path` (default empty, meaning the helper next to the runtime dylib).
   `auto` uses the helper only when a VideoToolbox query reports no hardware encoder for the
@@ -71,6 +78,11 @@ This file tracks user-facing, integration-facing, and runtime-relevant changes f
 
 ### Fixed
 
+- Fixed a session an app asked to exit staying stuck when the app stopped submitting frames, as
+  Unreal's editor does when it leaves VR Mode. The exit only moved on with each submitted frame, so
+  the session never reached `STOPPING`, was never ended or destroyed, and entering VR Mode again
+  reused it and showed nothing. Event polling now moves the exit on once no frame has come for
+  200 ms.
 - Fixed boolean actions bound to an identifier without a component, such as
   `/user/hand/left/input/trigger`, never turning on. They now read the identifier's click, which for
   the trigger and squeeze thresholds the value, and float actions read its value. Unreal binds its
@@ -131,6 +143,11 @@ This file tracks user-facing, integration-facing, and runtime-relevant changes f
 - Vulkan automation is limited to building the path, loader/dispatch checks, and the generic
   bounded `HostFence` wait contract. Real MoltenVK image export, fence completion, and streaming
   from a Vulkan OpenXR application remain manual release gates.
+- Headset audio travels only over USB; WiFi clients receive none. macOS asks the app that launched
+  the OpenXR application for permission to record system audio, and apps without
+  `NSAudioCaptureUsageDescription`, such as the Unreal Editor, have to be allowed by hand. The first
+  sound after the runtime starts loses about 0.1 s in the headset while the tap switches to muting
+  the Mac.
 
 ## 1.2.0 - 2026-06-19
 

@@ -28,6 +28,7 @@ add_library(oxrsys_runtime SHARED
     src/VideoEncoder.mm
     src/EncoderHelperClient.mm
     src/EncoderPathPolicy.cpp
+    src/HeadsetAudioCapture.mm
 )
 
 target_include_directories(oxrsys_runtime PRIVATE
@@ -64,6 +65,7 @@ target_link_libraries(oxrsys_runtime PRIVATE
     "-framework CoreMedia"
     "-framework CoreVideo"
     "-framework IOSurface"
+    "-framework CoreAudio"
 )
 
 # Only export the negotiation entry point.

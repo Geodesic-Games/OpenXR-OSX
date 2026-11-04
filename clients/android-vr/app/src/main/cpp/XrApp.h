@@ -18,6 +18,7 @@
 
 #include <openxr/openxr.h>
 
+#include "HeadsetAudioPlayer.h"
 #include "NetworkReceiver.h"
 #include "QuestPassthroughAlphaPolicy.h"
 #include "QuestShellInteraction.h"
@@ -111,6 +112,7 @@ private:
     void StopControlReceiver();
     void ControlReceiveThreadMain();
     void HandleControlPayload(const uint8_t* data, size_t size);
+    void PlayHeadsetAudio(const std::vector<uint8_t>& payload);
     void HandleStreamConfigUpdate(const protocol::StreamConfigUpdate& update);
     void StartStreamConfigWorker();
     void StopStreamConfigWorker();
@@ -256,6 +258,8 @@ private:
     std::unique_ptr<TrackingSender> trackingSender_;
     std::unique_ptr<VideoDecoder> videoDecoder_;
     std::mutex videoDecoderMutex_;
+    // Only the control receive thread plays into it; ResetConnection stops that thread first
+    std::unique_ptr<HeadsetAudioPlayer> headsetAudioPlayer_;
     int controlSocket_ = -1;
     int controlTcpSocket_ = -1;
     int spatialTcpSocket_ = -1;

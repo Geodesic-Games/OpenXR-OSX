@@ -81,14 +81,16 @@ struct TcpRenderPose
     uint32_t reserved2 = 0;
 };
 
+// Headset speaker audio on the USB control connection, followed by payloadSize bytes of
+// interleaved samples. See HeadsetAudio.h for the limits clients check.
 struct TcpAudioHeader
 {
-    int64_t presentationTimeNs = 0;
+    int64_t presentationTimeNs = 0; // Server capture time of the first frame
     uint32_t frameCount = 0;
     uint32_t payloadSize = 0;
     uint32_t sampleRateHz = 48000;
     uint16_t channels = 2;
-    uint16_t format = 1; // AudioSampleFormat::Float32
+    uint16_t format = 1; // AudioSampleFormat
 };
 
 // ─── Discovery (UDP broadcast on DISCOVERY_PORT) ────────────────────────────
@@ -169,6 +171,7 @@ enum class ClientReprojectionMode : uint32_t
 enum class AudioSampleFormat : uint16_t
 {
     Float32 = 1,
+    Int16 = 2, // Little-endian signed 16-bit, the format the runtime sends
 };
 
 struct ServerAnnounce

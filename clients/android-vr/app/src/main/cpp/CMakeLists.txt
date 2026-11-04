@@ -60,6 +60,8 @@ set(OXRSYS_PROTOCOL_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../c
 add_library(oxrsys_android SHARED
     main.cpp
     XrApp.cpp
+    HeadsetAudioBuffer.cpp
+    HeadsetAudioPlayer.cpp
     QuestPassthroughAlphaPolicy.cpp
     QuestShellInteraction.cpp
     VideoDecoder.cpp
@@ -75,6 +77,7 @@ target_include_directories(oxrsys_android PRIVATE
 
 target_link_libraries(oxrsys_android PRIVATE
     -Wl,--whole-archive native_app_glue -Wl,--no-whole-archive
+    aaudio
     android
     log
     mediandk

@@ -46,7 +46,8 @@ struct ConfigValues
     bool passthroughEnabled = false;  // Keep headset passthrough available for streaming
     bool appAlphaBlendPassthrough = false; // Advertise OpenXR alpha blend for explicit MR apps
     std::string occlusionMode = "off"; // "off", "scene_mesh", "environment_depth"
-    bool headsetAudio = false;       // Stream server audio to the headset
+    bool headsetAudio = false;       // Play the Mac's sound in a USB headset instead of on the Mac
+    std::string headsetAudioSource = "app"; // "app" (the OpenXR app's own sound) or "system" (every app's)
 
     bool spatialEnabled = false;
     bool spatialAnchors = false;

@@ -101,6 +101,31 @@ stream's color contract. The helper's design and IPC are described in
 The C++ and Swift protocol layouts must remain byte-compatible. See [Protocol](protocol.md) for
 ports, messages, feature flags, and compatibility rules.
 
+## Headset Audio
+
+With `streaming.headset_audio = true`, a Quest connected over USB plays the Mac's sound instead of
+the Mac. `streaming.headset_audio_source = "app"`, the default, records only the OpenXR
+application's process. `"system"` records every app, like a Quest Link PC, which also covers sound
+that the application plays from a helper process.
+
+The runtime records with a Core Audio process tap (macOS 14.2 or later), read through a private
+aggregate device. The tap's IO callback converts samples to 16-bit stereo into a lock-free ring. A
+dedicated headset-audio thread owns the tap: it starts it when an audio-capable USB client connects,
+stops it on disconnect, restarts it when Core Audio stops calling back, and sends the newest audio as
+`Audio` records on the USB control connection. Connect and disconnect handling, including the one
+`Session::EndFrame()` can reach through the liveness check, only points that thread at a socket or at
+nothing.
+
+macOS fills a tap only when the app responsible for the process may record system audio (System
+Settings > Privacy & Security > Screen & System Audio Recording). Without that permission the tap
+delivers silence without an error, yet a muting tap still silences the Mac. The runtime therefore
+starts with a tap that leaves the Mac playing and switches to one that mutes the Mac once real sound
+has arrived; if nothing arrives within 20 seconds while the app plays, it logs how to grant the
+permission. An app started from Finder or with `open` is responsible for itself, while an app started
+from a terminal uses the terminal's permission. Apps whose `Info.plist` lacks
+`NSAudioCaptureUsageDescription`, such as the Unreal Editor, never show the permission prompt and
+have to be added to that list with its + button.
+
 ## Input And Actions
 
 Tracking packets update head, controller, hand-joint, velocity, eye-FOV, and client status data.

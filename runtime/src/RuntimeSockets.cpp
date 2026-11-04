@@ -94,6 +94,33 @@ bool SetSendBuffer(SocketHandle socket, int bytes)
     return IsValid(socket) && SetIntOption(socket, SOL_SOCKET, SO_SNDBUF, bytes);
 }
 
+int GetSendBufferSize(SocketHandle socket)
+{
+    int bytes = 0;
+    socklen_t size = sizeof(bytes);
+    if (!IsValid(socket) || getsockopt(socket, SOL_SOCKET, SO_SNDBUF, &bytes, &size) != 0)
+    {
+        return -1;
+    }
+    return bytes;
+}
+
+int GetQueuedSendBytes(SocketHandle socket)
+{
+#if defined(SO_NWRITE)
+    int bytes = 0;
+    socklen_t size = sizeof(bytes);
+    if (!IsValid(socket) || getsockopt(socket, SOL_SOCKET, SO_NWRITE, &bytes, &size) != 0)
+    {
+        return -1;
+    }
+    return bytes;
+#else
+    (void)socket;
+    return -1;
+#endif
+}
+
 bool SetReceiveTimeout(SocketHandle socket, long seconds, long microseconds)
 {
     if (!IsValid(socket))

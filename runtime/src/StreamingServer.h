@@ -17,12 +17,15 @@
 
 #include "RuntimeSockets.h"
 #include "GraphicsTypes.h"
+#include "HeadsetAudioRing.h"
 #include "StreamingAbr.h"
 #include "StreamingFrameQueue.h"
 #include "StreamingReconfigure.h"
 
 // Shared protocol definitions
 #include <oxrsys/protocol/Protocol.h>
+
+#include <dispatch/dispatch.h>
 
 class VideoEncoder;
 class TrackingReceiver;
@@ -208,6 +211,14 @@ private:
     void SendUsbDisconnectBestEffort();
     void StopUsbTcpSockets();
 
+    // Headset audio. Connects and disconnects only point the sound at the current USB control
+    // socket or at nothing; the audio thread starts and stops the capture, so neither
+    // Session::EndFrame nor the TCP threads ever wait on Core Audio.
+    void HeadsetAudioThread();
+    // Requires tcpSocketMutex_; InvalidSocket turns headset audio off
+    void SetHeadsetAudioTargetLocked(SocketHandle controlSocket);
+    bool SendHeadsetAudioRecord(const uint8_t* record, size_t recordSize);
+
     std::atomic<State> state_{State::Stopped};
 
     // Server config
@@ -267,6 +278,8 @@ private:
     SocketHandle tcpTrackingClientSocket_ = oxrsys::runtime_socket::InvalidSocket;
     SocketHandle tcpSpatialClientSocket_ = oxrsys::runtime_socket::InvalidSocket;
     std::mutex tcpSocketMutex_;
+    // Keeps each record on the USB control socket whole. Taken before tcpSocketMutex_.
+    std::mutex tcpControlSendMutex_;
     std::mutex disconnectMutex_;
     std::mutex stopMutex_;
     std::mutex broadcastThreadMutex_;
@@ -291,7 +304,15 @@ private:
     std::thread tcpVideoThread_;
     std::thread tcpTrackingThread_;
     std::thread tcpSpatialThread_;
+    std::thread headsetAudioThread_;
     std::atomic<bool> running_{false};
+
+    // Headset audio state. headsetAudioSocket_ is guarded by tcpSocketMutex_.
+    std::atomic_bool headsetAudioWanted_{false};
+    SocketHandle headsetAudioSocket_ = oxrsys::runtime_socket::InvalidSocket;
+    dispatch_semaphore_t headsetAudioWake_ = nullptr;
+    oxrsys::HeadsetAudioRing headsetAudioRing_{48000};
+    std::atomic<uint32_t> headsetAudioDroppedRecords_{0};
     StreamingFrameQueue frameQueue_;
     std::shared_ptr<PacketDispatchState> packetDispatchState_;
     std::atomic<uint32_t> pendingFrameDepthMax_{0};

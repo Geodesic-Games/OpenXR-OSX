@@ -115,9 +115,13 @@ struct OXRSysServerConfig: Equatable {
     # Occlusion mode: "off", "scene_mesh", or "environment_depth".
     occlusion_mode = "off"
 
-    # Reserved for headset speaker audio. The runtime does not advertise audio until
-    # a platform capture/playback path is attached.
+    # Play the Mac's sound in the headset instead of on the Mac while a Quest streams over
+    # USB (macOS 14.2 or later). macOS asks the app that launched the OpenXR app for
+    # permission to record system audio.
     headset_audio = false
+
+    # Whose sound goes to the headset: "app" (only the OpenXR app) or "system" (every app).
+    headset_audio_source = "app"
 
     [spatial]
     # Spatial features stay disabled unless the headset client and runtime path support them.

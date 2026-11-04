@@ -117,6 +117,7 @@ final class ProtocolLayoutTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<TcpVideoNalHeader>.size, 24)
         XCTAssertEqual(MemoryLayout<TcpRenderPose>.size, 48)
         XCTAssertEqual(MemoryLayout<TcpAudioHeader>.size, 24)
+        XCTAssertEqual(AudioSampleFormat.int16.rawValue, 2)
         XCTAssertEqual(OXRProtocol.tcpRecordMagic, 0x4f585255)
         XCTAssertEqual(MemoryLayout<AudioPacketHeader>.size, 32)
         XCTAssertEqual(MemoryLayout<LatencyReport>.size, 40)

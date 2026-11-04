@@ -232,6 +232,32 @@ client_foveation_preset = "auto"
     CHECK(values.clientFoveationPreset == "auto");
 }
 
+TEST_CASE("Config parser reads which sound goes to the headset", "[config]")
+{
+    std::istringstream defaultsInput(R"TOML(
+[streaming]
+headset_audio = true
+)TOML");
+    const ConfigValues defaults = ParseConfigToml(defaultsInput);
+    CHECK(defaults.headsetAudio == true);
+    CHECK(defaults.headsetAudioSource == "app");
+
+    std::istringstream systemInput(R"TOML(
+[streaming]
+headset_audio_source = "system"
+)TOML");
+    CHECK(ParseConfigToml(systemInput).headsetAudioSource == "system");
+
+    // An unknown source keeps the previous value rather than guessing
+    ConfigValues previous;
+    previous.headsetAudioSource = "system";
+    std::istringstream unknownInput(R"TOML(
+[streaming]
+headset_audio_source = "speakers"
+)TOML");
+    CHECK(ParseConfigToml(unknownInput, previous).headsetAudioSource == "system");
+}
+
 TEST_CASE("Config parser enables Quest logcat capture from TOML", "[config]")
 {
     std::istringstream input(R"TOML(

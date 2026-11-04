@@ -21,6 +21,11 @@ helper, and a pinned software session for H.264, HEVC Main, and HEVC Main10. cte
 the build's own helper. Helper cases skip on an Intel Mac, which cannot run the `arm64` helper, and
 the mid-stream death case skips where the policy keeps the encode in-process.
 
+The headset audio tests cover the record format, the capture ring, and the Quest jitter cushion.
+`oxrsys_headset_audio_capture_tests` taps a tone too quiet to hear that the test process plays
+itself; when the app running the tests may not record system audio, the tap hears silence and the
+test checks only that Core Audio delivered blocks, with a warning.
+
 Graphics-extension tests must verify that Metal and Vulkan are exposed and that unsupported host
 graphics bindings are not advertised.
 
@@ -91,6 +96,8 @@ Automated checks do not replace these release gates:
 - stream an actual Metal application and an actual Vulkan/MoltenVK application
 - test WiFi and native ADB reverse USB on affected Quest 1/2/3/Pro and Pico devices
 - validate controller, hand, codec, refresh-rate, passthrough, ABR, and reprojection changes
+- for headset audio changes, play sound in an app streaming to a Quest over USB, confirm it plays in
+  the headset and not on the Mac, reconnect, and check the `OXRSys-Audio` logcat lines for underruns
 - for encoder-helper changes, stream H.265 Main, H.265 Main10, and H.264 from an `x86_64` runtime
   under Rosetta to a physical headset, then kill the helper mid-stream and confirm the stream
   continues without a color shift

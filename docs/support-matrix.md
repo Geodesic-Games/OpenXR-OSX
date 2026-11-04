@@ -54,6 +54,7 @@ not qualify either physical path.
 | Client reprojection | Quest and visionOS paths | Verify pose matching, stale-frame bounds, and recovery |
 | Passthrough/MR | Supported Quest devices | Verify support/readiness state and explicit alpha opt-in |
 | Dynamic encoded resolution | Reliable USB control | Must never resize application swapchains |
+| Headset audio | Quest Android client over USB | Verify the recording permission, the Mac going quiet after the first sound, and playback without underruns across reconnects |
 
 ## Reporting Rules
 

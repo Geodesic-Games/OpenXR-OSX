@@ -18,7 +18,7 @@ The WiFi transport uses UDP with dedicated ports:
 - Video: `9944`
 - Tracking: `9945`
 - Control: `9946`
-- Audio: `9947` (reserved for headset speaker audio; not advertised until an audio stream is active)
+- Audio: `9947` (reserved for WiFi headset audio; headset audio currently travels only on the USB control connection)
 - Spatial: `9948` (reserved reliable channel for anchors, scene capture, meshes, and larger async spatial results)
 
 Discovery announces the server and its stream settings. The control port also accepts the optional
@@ -70,13 +70,13 @@ The handshake exposes:
   `ClientConnect.deviceName`
 - preferred codec, supported codec mask, and bitrate limits
 - server feature flags for foveated encoding, client foveation override, client upscaling, stream
-  reconfiguration, passthrough, occlusion, spatial/scene support, and reserved headset audio
+  reconfiguration, passthrough, occlusion, spatial/scene support, and headset audio over USB
 - client capability flags for foveated encoding, client foveation, client upscaling, stream
   reconfiguration, passthrough, occlusion, spatial/scene support, and audio output
 - foveated encoding preset and aligned AADT parameters
 - client foveation override preset and client upscaling mode
 - client reprojection mode
-- audio port and sample rate fields reserved for headset speaker audio
+- audio port and sample rate fields, kept for compatibility; each audio record carries its own format
 
 `ServerAnnounce` is versioned as a 92-byte v1.0 base followed by v1.1 and v1.2 trailing fields.
 `ClientConnect` is versioned as an 80-byte v1.0 base followed by v1.1 trailing fields. Receivers
@@ -238,10 +238,30 @@ the runtime to the client.
 
 ## Audio Stream
 
-The protocol reserves stereo 48 kHz float PCM speaker audio over UDP `AUDIO_PORT` or TCP `Audio`
-records. The wire structs are present so clients and frontends can parse the protocol safely, but the
-runtime does not advertise `SERVER_FEATURE_HEADSET_AUDIO` until a real capture/playback path is
-attached. Microphone input is out of scope for this speaker-only path.
+The runtime can play the Mac's sound in a Quest headset connected over USB. It sets
+`SERVER_FEATURE_HEADSET_AUDIO` only in the `ServerAnnounce` it sends on the USB control connection,
+and only when `streaming.headset_audio` is enabled on macOS 14.2 or later. A client that plays the
+sound sets `CLIENT_CAPABILITY_AUDIO_OUTPUT` in `ClientConnect`; no other client receives audio.
+
+Audio travels from the runtime to the client as TCP `Audio` records on the USB control connection,
+so it never waits behind large video NAL records. Each record holds a `TcpAudioHeader` followed by
+interleaved little-endian 16-bit PCM (`AudioSampleFormat::Int16`), normally 48 kHz stereo in records
+of up to 20 ms. `presentationTimeNs` is the runtime's capture time of the first frame.
+`common/protocol/include/oxrsys/protocol/HeadsetAudio.h` writes and checks records. Clients skip any
+record with another sample format, more than two channels, a rate outside 8-192 kHz, more than 4800
+frames, or a payload size that does not match.
+
+Delivery is bounded and latest-first. The runtime never waits on the socket: it leaves a record out
+when the control socket already holds about 80 ms of unsent data, and it skips audio that waited more
+than 40 ms to be sent. Audio is never sent from `Session::EndFrame()` or a VideoToolbox callback, and
+every write to the control socket keeps records whole. Clients play from a small jitter cushion
+(40 ms, growing to at most 120 ms after running dry), cut late bursts back to it, and follow clock
+drift between the Mac and the headset by repeating or skipping single frames.
+
+Clients that do not advertise `CLIENT_CAPABILITY_AUDIO_OUTPUT` never receive audio records, and
+clients ignore record types they do not know on the control connection. A newer client connected to
+an older runtime receives no audio. UDP audio on `AUDIO_PORT` with `AudioPacketHeader` remains
+reserved and unused, and microphone input is out of scope.
 
 ## Session Lifecycle
 

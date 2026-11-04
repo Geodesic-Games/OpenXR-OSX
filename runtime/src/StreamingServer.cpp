@@ -3,6 +3,7 @@
 #include "StreamingServer.h"
 #include "ClientLiveness.h"
 #include "Config.h"
+#include "HeadsetAudioCapture.h"
 #include "RuntimePlatform.h"
 #include "RuntimeSockets.h"
 #include "RuntimeStatus.h"
@@ -13,6 +14,7 @@
 #include "VideoEncoder.h"
 #include <oxrsys/protocol/Foveation.h>
 #include <oxrsys/protocol/FecCodec.h>
+#include <oxrsys/protocol/HeadsetAudio.h>
 
 #include <spdlog/spdlog.h>
 
@@ -54,6 +56,15 @@ constexpr uint32_t kStreamConfigMaxRetries = 2;
 constexpr int64_t kClientLivenessTimeoutNs =
     std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::seconds(3)).count();
+
+// Headset audio leaves in records of up to 20 ms. At most 40 ms may wait to be sent and about
+// 80 ms may sit in the control socket; older audio is dropped so the headset hears it live.
+constexpr uint32_t kHeadsetAudioMaxRecordFrames = 960;
+constexpr uint32_t kHeadsetAudioMaxBacklogMs = 40;
+constexpr size_t kHeadsetAudioMaxQueuedBytes = 16 * 1024;
+constexpr auto kHeadsetAudioStalledAfter = std::chrono::seconds(3);
+constexpr auto kHeadsetAudioMaxRetryDelay = std::chrono::seconds(60);
+constexpr auto kHeadsetAudioSilenceWarningAfter = std::chrono::seconds(20);
 
 int64_t SteadyClockNowNs()
 {
@@ -512,7 +523,8 @@ struct EncodeTelemetry
 
 StreamingServer::StreamingServer()
     : frameQueue_([this](StreamingFrame& frame) { ReleaseStreamingFrame(frame); }),
-      packetDispatchState_(std::make_shared<PacketDispatchState>())
+      packetDispatchState_(std::make_shared<PacketDispatchState>()),
+      headsetAudioWake_(dispatch_semaphore_create(0))
 {
 }
 
@@ -524,6 +536,7 @@ StreamingServer::~StreamingServer()
         // Destruction would invalidate callback captures and is therefore fatal.
         std::terminate();
     }
+    dispatch_release(headsetAudioWake_);
 }
 
 std::shared_ptr<StreamingServer::CallbackAccess> StreamingServer::GetCallbackAccess()
@@ -740,6 +753,10 @@ bool StreamingServer::Start(uint32_t renderWidth, uint32_t renderHeight, uint32_
     controlThread_ = std::thread(&StreamingServer::ControlThread, this);
     videoSendThread_ = std::thread(&StreamingServer::VideoSendThread, this);
     encodeThread_ = std::thread(&StreamingServer::EncodeThread, this);
+    if (usbAdbEnabled_ && HeadsetAudioCapture::IsSupported())
+    {
+        headsetAudioThread_ = std::thread(&StreamingServer::HeadsetAudioThread, this);
+    }
 
     std::string ip = GetLocalIpAddress();
     spdlog::info("StreamingServer: Started transport={} wifi={} usb_adb={} on {} ({}x{} @ {}Hz)",
@@ -764,6 +781,8 @@ bool StreamingServer::Stop(std::chrono::nanoseconds timeout)
         std::lock_guard<std::mutex> videoSendLock(videoSendMutex_);
     }
     videoSendCv_.notify_all();
+    // Wakes the audio thread, which sees running_ cleared and stops the capture
+    dispatch_semaphore_signal(headsetAudioWake_);
     RuntimeStatus::SetIdle();
     SendUsbDisconnectBestEffort();
     StopUsbTcpSockets();
@@ -798,6 +817,7 @@ bool StreamingServer::Stop(std::chrono::nanoseconds timeout)
     JoinWorkerThread(tcpVideoThread_, "USB video");
     JoinWorkerThread(tcpTrackingThread_, "USB tracking");
     JoinWorkerThread(tcpSpatialThread_, "USB spatial");
+    JoinWorkerThread(headsetAudioThread_, "headset audio");
     frameQueue_.Clear();
     ClearVideoSendQueue();
 
@@ -920,8 +940,11 @@ oxr::protocol::ServerAnnounce StreamingServer::BuildServerAnnounce(
     // fail-closed until a valid app depth layer, headset depth, or scene mesh
     // source is connected to the compositor path.
     // Spatial flags remain fail-closed until a real backend is attached.
-    // Headset audio is part of the wire protocol, but the stream is advertised
-    // only once an actual capture/playback path is attached.
+    // Headset audio only travels on the USB control connection.
+    if (config.headsetAudio && reliableControlTransport && HeadsetAudioCapture::IsSupported())
+    {
+        announce.serverFeatures |= oxr::protocol::SERVER_FEATURE_HEADSET_AUDIO;
+    }
 
     announce.audioPort = oxr::protocol::AUDIO_PORT;
     announce.foveatedEncodingPreset = foveationPreset;
@@ -1046,6 +1069,7 @@ bool StreamingServer::StartUsbTcpListeners()
 
 void StreamingServer::SendUsbDisconnectBestEffort()
 {
+    std::lock_guard<std::mutex> sendLock(tcpControlSendMutex_);
     SocketHandle controlSocket = oxrsys::runtime_socket::InvalidSocket;
     {
         std::lock_guard<std::mutex> lock(tcpSocketMutex_);
@@ -1060,6 +1084,7 @@ void StreamingServer::SendUsbDisconnectBestEffort()
 void StreamingServer::StopUsbTcpSockets()
 {
     std::lock_guard<std::mutex> lock(tcpSocketMutex_);
+    SetHeadsetAudioTargetLocked(oxrsys::runtime_socket::InvalidSocket);
     SocketHandle* sockets[] = {
         &tcpControlListenSocket_,
         &tcpVideoListenSocket_,
@@ -1092,12 +1117,19 @@ void StreamingServer::TcpControlThread()
             {
                 CloseTcpSocket(tcpControlClientSocket_);
             }
+            // A new client gets sound only once it has connected
+            SetHeadsetAudioTargetLocked(oxrsys::runtime_socket::InvalidSocket);
             tcpControlClientSocket_ = clientSocket;
         }
 
         oxr::protocol::ServerAnnounce announce = BuildServerAnnounce(true);
-        if (!SendTcpRecord(clientSocket, oxr::protocol::TcpRecordType::ServerAnnounce,
-                           &announce, sizeof(announce)))
+        bool announceSent = false;
+        {
+            std::lock_guard<std::mutex> sendLock(tcpControlSendMutex_);
+            announceSent = SendTcpRecord(clientSocket, oxr::protocol::TcpRecordType::ServerAnnounce,
+                                         &announce, sizeof(announce));
+        }
+        if (!announceSent)
         {
             {
                 std::lock_guard<std::mutex> lock(tcpSocketMutex_);
@@ -1149,6 +1181,10 @@ void StreamingServer::TcpControlThread()
             else
             {
                 shouldClose = false;
+            }
+            if (headsetAudioSocket_ == clientSocket)
+            {
+                SetHeadsetAudioTargetLocked(oxrsys::runtime_socket::InvalidSocket);
             }
         }
         if (shouldClose)
@@ -1648,6 +1684,11 @@ void StreamingServer::HandleClientConnect(const oxr::protocol::ClientConnect& cl
         clientName_ = clientName;
         clientUsesUsbAdb_.store(false);
     }
+    {
+        // Headset audio only plays over USB
+        std::lock_guard<std::mutex> lock(tcpSocketMutex_);
+        SetHeadsetAudioTargetLocked(oxrsys::runtime_socket::InvalidSocket);
+    }
     clientSupportsStreamReconfigure_.store(
         HasClientCapability(clientConnect, oxr::protocol::CLIENT_CAPABILITY_STREAM_RECONFIGURE));
     const bool clientSupportsPassthrough =
@@ -2076,6 +2117,16 @@ void StreamingServer::HandleUsbClientConnect(const oxr::protocol::ClientConnect&
             }
         }
     }
+
+    const bool headsetAudio = encoderReady &&
+        Config::Get().GetValues().headsetAudio &&
+        HeadsetAudioCapture::IsSupported() &&
+        HasClientCapability(clientConnect, oxr::protocol::CLIENT_CAPABILITY_AUDIO_OUTPUT);
+    {
+        std::lock_guard<std::mutex> lock(tcpSocketMutex_);
+        SetHeadsetAudioTargetLocked(headsetAudio ? tcpControlClientSocket_
+                                                 : oxrsys::runtime_socket::InvalidSocket);
+    }
 }
 
 void StreamingServer::HandleClientDisconnect()
@@ -2112,13 +2163,16 @@ void StreamingServer::HandleClientDisconnect()
         packetDispatchState_->videoSocket = videoSocket_;
         packetDispatchState_->videoUsesTcp = false;
     }
-    if (wasUsbClient)
     {
         std::lock_guard<std::mutex> lock(tcpSocketMutex_);
-        CloseTcpSocket(tcpControlClientSocket_);
-        CloseTcpSocket(tcpVideoClientSocket_);
-        CloseTcpSocket(tcpTrackingClientSocket_);
-        CloseTcpSocket(tcpSpatialClientSocket_);
+        SetHeadsetAudioTargetLocked(oxrsys::runtime_socket::InvalidSocket);
+        if (wasUsbClient)
+        {
+            CloseTcpSocket(tcpControlClientSocket_);
+            CloseTcpSocket(tcpVideoClientSocket_);
+            CloseTcpSocket(tcpTrackingClientSocket_);
+            CloseTcpSocket(tcpSpatialClientSocket_);
+        }
     }
 
     {
@@ -2295,6 +2349,7 @@ bool StreamingServer::SendControlPayload(const void* payload, size_t payloadSize
 
     if (clientUsesUsbAdb_.load())
     {
+        std::lock_guard<std::mutex> sendLock(tcpControlSendMutex_);
         SocketHandle controlSocket = oxrsys::runtime_socket::InvalidSocket;
         {
             std::lock_guard<std::mutex> lock(tcpSocketMutex_);
@@ -3227,6 +3282,214 @@ void StreamingServer::MarkTcpVideoSendFailed(
     {
         oxrsys::runtime_socket::Shutdown(socket);
         spdlog::warn("StreamingServer: USB TCP video send failed; disabled stale video dispatch");
+    }
+}
+
+void StreamingServer::SetHeadsetAudioTargetLocked(SocketHandle controlSocket)
+{
+    headsetAudioSocket_ = controlSocket;
+    headsetAudioWanted_.store(oxrsys::runtime_socket::IsValid(controlSocket));
+    dispatch_semaphore_signal(headsetAudioWake_);
+}
+
+bool StreamingServer::SendHeadsetAudioRecord(const uint8_t* record, size_t recordSize)
+{
+    std::lock_guard<std::mutex> sendLock(tcpControlSendMutex_);
+    std::lock_guard<std::mutex> socketLock(tcpSocketMutex_);
+    const SocketHandle socket = headsetAudioSocket_;
+    if (!oxrsys::runtime_socket::IsValid(socket) || socket != tcpControlClientSocket_)
+    {
+        return false;
+    }
+
+    // Audio still waiting in the socket would only be heard late, and a record that can't go
+    // out whole would leave the headset lost in the stream, so such a record is left out
+    const int queuedBytes = oxrsys::runtime_socket::GetQueuedSendBytes(socket);
+    const int bufferBytes = oxrsys::runtime_socket::GetSendBufferSize(socket);
+    const size_t queueLimit = std::min(kHeadsetAudioMaxQueuedBytes, static_cast<size_t>(std::max(bufferBytes, 0)) / 2);
+    if (queuedBytes < 0 || static_cast<size_t>(queuedBytes) + recordSize > queueLimit)
+    {
+        headsetAudioDroppedRecords_.fetch_add(1);
+        return false;
+    }
+
+    const int sent = oxrsys::runtime_socket::Send(socket, record, recordSize, kBestEffortSendFlags);
+    if (sent == static_cast<int>(recordSize))
+    {
+        return true;
+    }
+    if (sent > 0)
+    {
+        // Part of a record went out, so the headset can no longer tell where the next one
+        // starts. Closing the connection makes it reconnect cleanly.
+        oxrsys::runtime_socket::Shutdown(socket);
+        spdlog::warn("StreamingServer: USB control connection stalled in the middle of headset audio; reconnecting");
+        return false;
+    }
+    headsetAudioDroppedRecords_.fetch_add(1);
+    return false;
+}
+
+void StreamingServer::HeadsetAudioThread()
+{
+    using oxr::protocol::TcpRecordHeader;
+    constexpr uint16_t channels = oxrsys::HeadsetAudioRing::Channels;
+
+    HeadsetAudioCapture capture;
+    std::vector<int16_t> samples(static_cast<size_t>(kHeadsetAudioMaxRecordFrames) * channels);
+    std::vector<uint8_t> record(sizeof(TcpRecordHeader) +
+                                oxr::protocol::HeadsetAudioRecordPayloadSize(kHeadsetAudioMaxRecordFrames, channels));
+
+    Clock::time_point nextStartTime = {};
+    Clock::duration retryDelay = std::chrono::seconds(1);
+    Clock::time_point captureStartTime = {};
+    Clock::time_point lastCallbackTime = {};
+    uint64_t lastCallbackCount = 0;
+    // macOS hands a tap silence without an error when this app may not record audio, yet a
+    // muting tap still silences the Mac. So the first tap only listens, and the sound moves
+    // off the Mac once real sound has arrived, which proves recording is allowed.
+    bool recordingAllowed = false;
+    bool warnedAboutSilence = false;
+    Clock::time_point lastDropReportTime = Clock::now();
+    uint64_t reportedLateRecords = 0;
+    uint64_t reportedLateFrames = 0;
+
+    while (running_.load())
+    {
+        const int64_t waitNs = capture.IsRunning() ? 50'000'000 : 500'000'000;
+        dispatch_semaphore_wait(headsetAudioWake_, dispatch_time(DISPATCH_TIME_NOW, waitNs));
+        if (!running_.load())
+        {
+            break;
+        }
+
+        if (!headsetAudioWanted_.load())
+        {
+            if (capture.IsRunning())
+            {
+                capture.Stop();
+                spdlog::info("StreamingServer: headset audio off; the Mac plays its own sound again");
+            }
+            nextStartTime = {};
+            retryDelay = std::chrono::seconds(1);
+            continue;
+        }
+
+        const Clock::time_point now = Clock::now();
+        if (!capture.IsRunning())
+        {
+            if (now < nextStartTime)
+            {
+                continue;
+            }
+            const bool everyApp = Config::Get().GetValues().headsetAudioSource == "system";
+            headsetAudioRing_.Reset();
+            const bool started = capture.Start(
+                everyApp ? HeadsetAudioCapture::Source::System : HeadsetAudioCapture::Source::App,
+                recordingAllowed,
+                [this](const float* left, const float* right, uint32_t stride, uint32_t frameCount,
+                       int64_t captureTimeNs) {
+                    headsetAudioRing_.WriteFloat(left, right, stride, frameCount, captureTimeNs);
+                    dispatch_semaphore_signal(headsetAudioWake_);
+                });
+            if (!started)
+            {
+                nextStartTime = now + retryDelay;
+                retryDelay = std::min<Clock::duration>(retryDelay * 2, kHeadsetAudioMaxRetryDelay);
+                continue;
+            }
+            retryDelay = std::chrono::seconds(1);
+            captureStartTime = now;
+            lastCallbackTime = now;
+            lastCallbackCount = 0;
+            warnedAboutSilence = false;
+            reportedLateRecords = headsetAudioDroppedRecords_.load();
+            reportedLateFrames = 0;
+            spdlog::info("StreamingServer: headset audio on: {} at {} Hz{}",
+                         everyApp ? "every app's sound" : "this app's sound",
+                         capture.GetSampleRateHz(),
+                         recordingAllowed ? ", no longer playing on this Mac"
+                                          : "; it moves off this Mac once the first sound arrives");
+        }
+
+        // Restart the tap when Core Audio stops calling back, for example after the device
+        // behind it went away
+        const uint64_t callbackCount = capture.GetCallbackCount();
+        if (callbackCount != lastCallbackCount)
+        {
+            lastCallbackCount = callbackCount;
+            lastCallbackTime = now;
+        }
+        else if (now - lastCallbackTime > kHeadsetAudioStalledAfter)
+        {
+            spdlog::warn("StreamingServer: headset audio stopped arriving from Core Audio; restarting it");
+            capture.Stop();
+            nextStartTime = now + retryDelay;
+            continue;
+        }
+
+        const uint32_t sampleRateHz = capture.GetSampleRateHz();
+        const uint32_t maxBacklogFrames = sampleRateHz * kHeadsetAudioMaxBacklogMs / 1000;
+        bool heardSound = false;
+        uint32_t frameCount = 0;
+        while ((frameCount = headsetAudioRing_.Read(samples.data(), kHeadsetAudioMaxRecordFrames, maxBacklogFrames)) > 0)
+        {
+            if (!recordingAllowed && !heardSound)
+            {
+                const auto recordSamplesEnd = samples.begin() + static_cast<size_t>(frameCount) * channels;
+                heardSound = std::any_of(samples.begin(), recordSamplesEnd,
+                                         [](int16_t sample) { return sample != 0; });
+            }
+
+            // When the record's first frame was captured, counted back from the newest frame
+            const uint32_t framesFromFirst = frameCount + headsetAudioRing_.GetAvailableFrames();
+            const int64_t firstFrameTimeNs = headsetAudioRing_.GetLastWriteEndTimeNs() -
+                static_cast<int64_t>(framesFromFirst) * 1'000'000'000 / sampleRateHz;
+
+            const size_t payloadSize = oxr::protocol::WriteHeadsetAudioRecord(
+                record.data() + sizeof(TcpRecordHeader), firstFrameTimeNs, sampleRateHz, channels,
+                samples.data(), frameCount);
+            TcpRecordHeader header = {};
+            header.type = oxr::protocol::TcpRecordType::Audio;
+            header.payloadSize = static_cast<uint32_t>(payloadSize);
+            memcpy(record.data(), &header, sizeof(header));
+            SendHeadsetAudioRecord(record.data(), sizeof(header) + payloadSize);
+        }
+
+        if (heardSound && !recordingAllowed)
+        {
+            recordingAllowed = true;
+            // Start over with a tap that keeps the sound off the Mac
+            capture.Stop();
+            nextStartTime = {};
+            dispatch_semaphore_signal(headsetAudioWake_);
+            continue;
+        }
+        if (!recordingAllowed && !warnedAboutSilence &&
+            now - captureStartTime > kHeadsetAudioSilenceWarningAfter && capture.IsSourcePlaying())
+        {
+            warnedAboutSilence = true;
+            spdlog::warn("StreamingServer: headset audio has heard nothing yet, so the Mac keeps playing its sound. "
+                         "If sound is playing, macOS isn't letting this app record it: allow the app that "
+                         "started it under System Settings > Privacy & Security > Screen & System Audio Recording");
+        }
+
+        const uint64_t lateRecords = headsetAudioDroppedRecords_.load();
+        const uint64_t lateFrames = headsetAudioRing_.GetDroppedFrames() + headsetAudioRing_.GetSkippedFrames();
+        if ((lateRecords != reportedLateRecords || lateFrames != reportedLateFrames) &&
+            now - lastDropReportTime >= std::chrono::seconds(10))
+        {
+            spdlog::warn("StreamingServer: headset audio fell behind the USB link and left out {} records and {} frames",
+                         lateRecords - reportedLateRecords, lateFrames - reportedLateFrames);
+            reportedLateRecords = lateRecords;
+            reportedLateFrames = lateFrames;
+            lastDropReportTime = now;
+        }
+    }
+
+    if (capture.IsRunning())
+    {
+        capture.Stop();
     }
 }
 

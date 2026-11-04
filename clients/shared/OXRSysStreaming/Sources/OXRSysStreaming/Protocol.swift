@@ -150,6 +150,7 @@ public enum ClientReprojectionMode: UInt32, Sendable {
 
 public enum AudioSampleFormat: UInt16, Sendable {
     case float32 = 1
+    case int16 = 2
 }
 
 public struct ServerAnnounce: Sendable {
