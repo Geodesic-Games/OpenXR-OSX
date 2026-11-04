@@ -709,6 +709,11 @@ static XRAPI_ATTR XrResult XRAPI_CALL OxrPollEvent(
     {
         return XR_ERROR_HANDLE_INVALID;
     }
+    // An app that asked to exit and stopped rendering still needs its session to reach STOPPING
+    if (gSession)
+    {
+        gSession->AdvanceExitWithoutFrames();
+    }
     return inst->PollEvent(eventData);
 }
 

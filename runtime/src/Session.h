@@ -94,6 +94,10 @@ public:
         return exitRequested_;
     }
 
+    // Moves a session the app asked to exit on toward STOPPING when the app has stopped submitting
+    // frames, which is the only thing that moves it on otherwise. Called when the app polls events.
+    void AdvanceExitWithoutFrames();
+
     XrTime GetCurrentTime() const;
     // XR_KHR_convert_timespec_time helpers. CLOCK_MONOTONIC is captured at the
     // same instant startTime_ is set (monoStartNs_), so XrTime == mono_ns -
@@ -130,6 +134,11 @@ private:
     XrSessionState state_ = XR_SESSION_STATE_IDLE;
     bool running_ = false;
     bool exitRequested_ = false;
+    // When exit was requested and when the app last ended a frame, in steady-clock nanoseconds
+    std::atomic<int64_t> exitRequestNs_{0};
+    std::atomic<int64_t> lastEndFrameNs_{0};
+    // Frame submission and event polling both move the session's state along, from different threads
+    std::mutex stateAdvanceMutex_;
     bool frameBegun_ = false;
     uint32_t waitedFrameCount_ = 0;
     mutable std::mutex frameStateMutex_;

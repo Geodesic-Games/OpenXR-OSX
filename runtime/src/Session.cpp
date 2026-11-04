@@ -110,6 +110,17 @@ bool IsSupportedEnvironmentBlendMode(XrEnvironmentBlendMode blendMode, const Ins
 
 constexpr uint32_t kMaxSupportedCompositionLayers = XR_MIN_COMPOSITION_LAYERS_SUPPORTED;
 
+// How long a session that should exit waits for another submitted frame before event polling
+// moves it on instead; long enough that an app still rendering moves it on with its own frames
+constexpr int64_t kExitWithoutFramesGraceNs = 200'000'000;
+
+int64_t SteadyNowNs()
+{
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
 bool IsFiniteQuaternion(const XrQuaternionf& orientation)
 {
     return std::isfinite(orientation.x) && std::isfinite(orientation.y) &&
@@ -329,8 +340,27 @@ XrResult Session::RequestExitSession()
         return XR_ERROR_SESSION_NOT_RUNNING;
     }
 
+    exitRequestNs_.store(SteadyNowNs(), std::memory_order_release);
     exitRequested_ = true;
     return XR_SUCCESS;
+}
+
+void Session::AdvanceExitWithoutFrames()
+{
+    if (!running_ || !exitRequested_)
+    {
+        return;
+    }
+    // Unreal's editor stops rendering VR as soon as it leaves VR Mode, so without this its session
+    // never reached STOPPING, was never ended, and the next VR Mode reused it and showed nothing
+    const int64_t lastActivityNs = std::max(exitRequestNs_.load(std::memory_order_acquire),
+                                            lastEndFrameNs_.load(std::memory_order_acquire));
+    if (SteadyNowNs() - lastActivityNs < kExitWithoutFramesGraceNs)
+    {
+        return;
+    }
+    std::scoped_lock lock(stateAdvanceMutex_);
+    AdvanceSessionStateAfterFrameSubmission();
 }
 
 XrResult Session::Shutdown()
@@ -798,7 +828,11 @@ XrResult Session::EndFrame(const XrFrameEndInfo* frameEndInfo)
         frameBegun_ = false;
     }
 
-    AdvanceSessionStateAfterFrameSubmission();
+    lastEndFrameNs_.store(SteadyNowNs(), std::memory_order_release);
+    {
+        std::scoped_lock lock(stateAdvanceMutex_);
+        AdvanceSessionStateAfterFrameSubmission();
+    }
     return XR_SUCCESS;
 }
 

@@ -1108,6 +1108,42 @@ TEST_CASE("BeginSession rejects unsupported view configuration types", "[runtime
     CHECK(xrBeginSession(context.session, &beginInfo) == XR_ERROR_VIEW_CONFIGURATION_TYPE_UNSUPPORTED);
 }
 
+// Polls events until the session reaches the given state, or a couple of seconds pass
+static bool PollUntilSessionState(XrInstance instance, XrSessionState wantedState)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        XrEventDataBuffer event = {XR_TYPE_EVENT_DATA_BUFFER};
+        const XrResult result = xrPollEvent(instance, &event);
+        if (result == XR_SUCCESS && event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED)
+        {
+            const auto* stateChanged = reinterpret_cast<const XrEventDataSessionStateChanged*>(&event);
+            if (stateChanged->state == wantedState)
+            {
+                return true;
+            }
+        }
+        else if (result == XR_EVENT_UNAVAILABLE)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+    }
+    return false;
+}
+
+TEST_CASE("Session exit finishes when the app stops submitting frames", "[runtime][loader]")
+{
+    // Unreal's editor stops rendering as soon as it leaves VR Mode and only polls events after that
+    RuntimeSessionContext context({XR_KHR_METAL_ENABLE_EXTENSION_NAME});
+
+    XR_CHECK(xrRequestExitSession(context.session));
+    CHECK(PollUntilSessionState(context.instance, XR_SESSION_STATE_STOPPING));
+
+    XR_CHECK(xrEndSession(context.session));
+    CHECK(PollUntilSessionState(context.instance, XR_SESSION_STATE_EXITING));
+}
+
 TEST_CASE("DestroySession tolerates active frame loop resources", "[runtime][loader]")
 {
     XrInstanceCreateInfo createInfo = {XR_TYPE_INSTANCE_CREATE_INFO};
