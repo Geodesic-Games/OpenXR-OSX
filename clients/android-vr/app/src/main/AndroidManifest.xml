@@ -8,6 +8,10 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
+    <!-- Optional host-assisted optical observations, enabled explicitly by the operator. -->
+    <uses-permission android:name="horizonos.permission.HEADSET_CAMERA" />
+    <uses-feature android:name="horizonos.feature.HEADSET_CAMERA" android:required="false" />
+
     <!-- OpenXR runtime broker permissions (required by Khronos loader on Android 11+) -->
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />

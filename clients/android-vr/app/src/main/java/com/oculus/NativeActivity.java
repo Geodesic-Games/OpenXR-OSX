@@ -26,6 +26,37 @@ public class NativeActivity extends android.app.NativeActivity
     private static final String TAG = "OXRSys-NativeActivity";
     private static final String ACTION_USB_PERMISSION = "net.demonixis.oxrsys.android.USB_PERMISSION";
 
+    private static final String HEADSET_CAMERA = "horizonos.permission.HEADSET_CAMERA";
+    private StationCamera stationCamera;
+    private boolean cameraRequested;
+    private boolean resumed;
+
+    private void updateStationCamera() {
+        boolean enabled = resumed && getIntent() != null && getIntent().getBooleanExtra("oxrsys_relock", false);
+        if (!enabled) {
+            if (stationCamera != null) stationCamera.close();
+            stationCamera = null;
+            return;
+        }
+        if (checkSelfPermission(HEADSET_CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            if (!cameraRequested) {
+                cameraRequested = true;
+                requestPermissions(new String[]{HEADSET_CAMERA}, 7812);
+            }
+            return;
+        }
+        if (stationCamera == null) {
+            stationCamera = new StationCamera(this);
+            stationCamera.start();
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(request, permissions, results);
+        if (request == 7812) updateStationCamera();
+    }
+
     private UsbManager usbManager;
     private PendingIntent usbPermissionIntent;
     private boolean usbReceiverRegistered = false;
@@ -67,6 +98,8 @@ public class NativeActivity extends android.app.NativeActivity
         Log.i(TAG, "onNewIntent");
         super.onNewIntent(intent);
         setIntent(intent);
+        cameraRequested = false;
+        updateStationCamera();
         probeUsbPermissionTargets(intent);
     }
 
@@ -75,6 +108,8 @@ public class NativeActivity extends android.app.NativeActivity
     {
         Log.i(TAG, "onResume");
         super.onResume();
+        resumed = true;
+        updateStationCamera();
         probeUsbPermissionTargets(getIntent());
     }
 
@@ -82,6 +117,8 @@ public class NativeActivity extends android.app.NativeActivity
     protected void onPause()
     {
         Log.i(TAG, "onPause");
+        resumed = false;
+        updateStationCamera();
         super.onPause();
     }
 

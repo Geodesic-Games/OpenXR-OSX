@@ -276,3 +276,28 @@ USB TCP sends full encoded NAL records and render-pose records, so UDP FEC and N
 - The current path is optimized for low-latency iteration, not for wide-network robustness.
 - Rotation smoothness depends on render-pose match rate staying near 100%; misses should be investigated alongside displayed frame age, stale-frame reuse, dropped frames, NACKs, and keyframe requests.
 - Regular PICO validation is newer than Quest validation and should be kept in the log matrix when controller or hand tracking changes.
+
+## Opt-in Quest station camera
+
+The rehearsal client exposes fresh 1280 × 960 left RGB camera images to a paired operator computer over ADB. The alignment worker on that computer can identify physical station geometry while the headset continues to display the streamed scene. Activate this only for a station using Meta's Passthrough Camera API and grant camera access in the headset. [Meta Android Camera2 guide](https://developers.meta.com/vr/documentation/native/android/pca-native-documentation/)
+
+Build with Java 17 and the project's Android SDK/NDK. From the repository root:
+
+```sh
+cd clients/android-vr
+./gradlew assembleRelease
+adb -s SERIAL install -r app/build/outputs/apk/release/app-release.apk
+adb -s SERIAL shell am start -n net.demonixis.oxrsys.android/com.oculus.NativeActivity --ez oxrsys_relock true
+```
+
+Run the operator's station client on the paired computer. A single authorized USB or wireless ADB connection is sufficient. The activity starts the Camera2 session only when explicitly requested and foregrounded. To stop, use the same activity command with `--ez oxrsys_relock false`. Camera access also stops on pause. [Human Touch rehearsal worker and physical setup](https://github.com/zzfadi/geotech-robotics-hackathon/blob/main/docs/quest-look-to-relock.md)
+
+**Snapshot protocol.** Forward an ephemeral local TCP port with `adb -s SERIAL forward tcp:0 localabstract:oxrsys_station_camera_v1`. Open a new connection for each observation and write byte 1. The response starts with a four-byte big-endian unsigned JSON header length followed by its UTF-8 JSON. On success the header contains version 1, camera ID, dimensions, build, crop, distortion mode, focus and `timestamp_ns`. Read exactly 1,843,200 bytes of row-packed I420 (Y, U, V). An error header contains `error` and has no image. A requested photograph is delivered only when its sensor timestamp matches the requested capture's result. The head-pose association and metric station checks belong to the host. The endpoint admits local adbd shell or root peers, operates on demand, and retains no image files. Remove the forward when finished.
+
+**Verification.** From the repository root, run the following with JDK 17. It tests out-of-order exposure pairing and planar/interleaved YUV row handling. On hardware, verify that camera access, the optical watcher and the passthrough compositor work together, and that pausing the app closes the endpoint.
+
+```sh
+classes=$(mktemp -d)
+javac -d "$classes" clients/android-vr/app/src/main/java/com/oculus/ExposureFrames.java tests/android/ExposureFramesTest.java
+java -cp "$classes" com.oculus.ExposureFramesTest
+```
