@@ -6,6 +6,8 @@ This file tracks user-facing, integration-facing, and runtime-relevant changes f
 
 ### Added
 
+- The Quest client uses tracked Meta hand meshes to reveal real hands in mixed reality video. Optional station camera snapshots include lens and exposure metadata for measuring room illumination.
+
 - Added optional, request-tagged Quest 3 RGB camera snapshots over local ADB for host-assisted physical station registration. The client requires headset camera permission and explicit launch opt-in. It pairs each YUV buffer with its exposure metadata and closes the camera when paused.
 
 - Added first-class macOS `arm64` and `x86_64` CI lanes plus universal release packaging with

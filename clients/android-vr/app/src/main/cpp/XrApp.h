@@ -22,6 +22,7 @@
 #include "NetworkReceiver.h"
 #include "QuestPassthroughAlphaPolicy.h"
 #include "QuestShellInteraction.h"
+#include "QuestHandMask.h"
 #include "TrackingSender.h"
 #include "VideoDecoder.h"
 
@@ -126,6 +127,7 @@ private:
                            int64_t timestampNs, int64_t receiveTimeNs, uint8_t flags, uint8_t codec);
 
     bool RenderFrame(XrTime predictedDisplayTime);
+    void DrawPassthroughHands(int eye);
     void BlitVideoToSwapchain(int eye);
     bool CreateShellResources();
     void DestroyShellResources();
@@ -162,6 +164,14 @@ private:
     PFN_xrDestroyHandTrackerEXT xrDestroyHandTrackerEXT_ = nullptr;
     PFN_xrLocateHandJointsEXT xrLocateHandJointsEXT_ = nullptr;
     XrHandTrackerEXT handTrackers_[2] = {};
+    PFN_xrGetHandMeshFB getHandMesh_ = nullptr;
+    bool handMeshExtension_ = false;
+    QuestHandMask handMasks_[2];
+    bool handMaskValid_[2]{}, handMaskUploaded_[2]{};
+    uint32_t handMaskFrames_[2]{};
+    GLuint handMaskVao_[2]{}, handMaskVbo_[2]{}, handMaskEbo_[2]{};
+    GLuint handMaskProgram_ = 0;
+    GLint handMaskMvp_ = -1;
     bool foveationAvailable_ = false;
     bool passthroughExtensionAvailable_ = false;
     bool passthroughSupported_ = false;

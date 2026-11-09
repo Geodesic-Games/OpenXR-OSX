@@ -62,6 +62,7 @@ add_library(oxrsys_android SHARED
     XrApp.cpp
     HeadsetAudioBuffer.cpp
     HeadsetAudioPlayer.cpp
+    QuestHandMask.cpp
     QuestPassthroughAlphaPolicy.cpp
     QuestShellInteraction.cpp
     VideoDecoder.cpp

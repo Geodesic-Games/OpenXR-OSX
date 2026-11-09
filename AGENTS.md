@@ -115,6 +115,7 @@ As of March 17, 2026, the pinned non-interactive OpenXR-CTS baseline is green lo
 - Home first tries its native ADB host protocol on `127.0.0.1:5037`, then the configured external
   `adb` fallback. USB readiness and reverse setup stay asynchronous, request-scoped, bounded, and
   reject stale results after the mode, path, device serial, or transport changes.
+- Use tracked hand meshes to cut alpha only for a streaming Quest passthrough frame. Drop the mask when tracking is lost. Camera exposure metadata can vary per frame and must stay separate from lens identity.
 - The optional Android station-camera endpoint requires explicit activity opt-in and the Horizon headset camera permission. Keep snapshots on the ADB-shell local socket. Match the requested capture result and image by sensor timestamp, handle YUV plane strides, and close the camera on activity pause. Keep camera pixels out of stream telemetry and logs.
 - Quest TCP sends are bounded. Failed video sends clear stale dispatch state without blocking the
   encoder, callback, or OpenXR frame path.

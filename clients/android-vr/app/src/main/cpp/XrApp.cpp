@@ -1091,6 +1091,7 @@ bool XrApp::CreateInstance(struct android_app* app)
     };
 
     handTrackingExtensionAvailable_ = hasExtension(XR_EXT_HAND_TRACKING_EXTENSION_NAME);
+    handMeshExtension_ = handTrackingExtensionAvailable_ && hasExtension(XR_FB_HAND_TRACKING_MESH_EXTENSION_NAME);
     foveationAvailable_ = hasExtension(XR_FB_FOVEATION_EXTENSION_NAME);
     passthroughExtensionAvailable_ = hasExtension(XR_FB_PASSTHROUGH_EXTENSION_NAME);
     foveationConfigurationAvailable_ = hasExtension(XR_FB_FOVEATION_CONFIGURATION_EXTENSION_NAME);
@@ -1107,6 +1108,7 @@ bool XrApp::CreateInstance(struct android_app* app)
     if (handTrackingExtensionAvailable_)
     {
         extensions.push_back(XR_EXT_HAND_TRACKING_EXTENSION_NAME);
+        if (handMeshExtension_) extensions.push_back(XR_FB_HAND_TRACKING_MESH_EXTENSION_NAME);
     }
     if (foveationAvailable_)
     {
@@ -1197,6 +1199,8 @@ bool XrApp::CreateInstance(struct android_app* app)
 
     if (handTrackingExtensionAvailable_)
     {
+        if (handMeshExtension_)
+            xrGetInstanceProcAddr(instance_, "xrGetHandMeshFB", reinterpret_cast<PFN_xrVoidFunction*>(&getHandMesh_));
         xrGetInstanceProcAddr(instance_, "xrCreateHandTrackerEXT",
                               reinterpret_cast<PFN_xrVoidFunction*>(&xrCreateHandTrackerEXT_));
         xrGetInstanceProcAddr(instance_, "xrDestroyHandTrackerEXT",
@@ -1604,6 +1608,11 @@ bool XrApp::InitializeHandTracking()
             ShutdownHandTracking();
             return false;
         }
+        if (getHandMesh_) {
+            const bool loaded = handMasks_[hand].Load(getHandMesh_, handTrackers_[hand]);
+            LOGI("Meta passthrough hand mesh %s: loaded=%d vertices=%zu",hand ? "right":"left",loaded,
+                 handMasks_[hand].Vertices().size());
+        }
     }
 
     LOGI("Hand trackers created");
@@ -1612,6 +1621,16 @@ bool XrApp::InitializeHandTracking()
 
 void XrApp::ShutdownHandTracking()
 {
+    for (int i=0;i<2;++i) {
+        if (handMaskVao_[i]) glDeleteVertexArrays(1,&handMaskVao_[i]);
+        if (handMaskVbo_[i]) glDeleteBuffers(1,&handMaskVbo_[i]);
+        if (handMaskEbo_[i]) glDeleteBuffers(1,&handMaskEbo_[i]);
+        handMaskVao_[i]=handMaskVbo_[i]=handMaskEbo_[i]=0;
+        handMasks_[i]={};
+        handMaskValid_[i]=handMaskUploaded_[i]=false; handMaskFrames_[i]=0;
+    }
+    if (handMaskProgram_) glDeleteProgram(handMaskProgram_);
+    handMaskProgram_=0; handMaskMvp_=-1;
     for (XrHandTrackerEXT& handTracker : handTrackers_)
     {
         if (handTracker != XR_NULL_HANDLE && xrDestroyHandTrackerEXT_ != nullptr)
@@ -4202,6 +4221,8 @@ bool XrApp::RenderFrame(XrTime predictedDisplayTime)
             RenderShellToSwapchain(eye, transparentShell);
         }
 
+        if (hasVideo && EvaluatePassthroughAlphaKey().useBlackKeyAlpha && CanUseShellPassthrough())
+            DrawPassthroughHands(eye);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
         // Release swapchain image
@@ -4210,6 +4231,46 @@ bool XrApp::RenderFrame(XrTime predictedDisplayTime)
     }
 
     return hasVideo;
+}
+
+void XrApp::DrawPassthroughHands(int eye)
+{
+    if (!handMaskValid_[0] && !handMaskValid_[1]) return;
+    if (!handMaskProgram_) {
+        static const char* vs="#version 300 es\nlayout(location=0) in vec3 p; uniform mat4 mvp; void main(){gl_Position=mvp*vec4(p,1.0);}";
+        static const char* fs="#version 300 es\nprecision mediump float; out vec4 color; void main(){color=vec4(0.0);}";
+        handMaskProgram_=CreateProgram(vs,fs);
+        if (!handMaskProgram_) return;
+        handMaskMvp_=glGetUniformLocation(handMaskProgram_,"mvp");
+    }
+    // Draw in exactly the same sub-image and reference pose we submit to the compositor.
+    const XrPosef pose=hasVideoTexture_ && hasCurrentRenderPose_ ?
+        BuildEyePoseFromRenderPose(currentRenderPose_,eye):views_[eye].pose;
+    const Mat4 mvp=MultiplyMat4(ProjectionFromFov(views_[eye].fov),ViewFromPose(pose));
+    glUseProgram(handMaskProgram_);
+    glUniformMatrix4fv(handMaskMvp_,1,GL_FALSE,mvp.m);
+    glDisable(GL_BLEND); glDisable(GL_DEPTH_TEST); glDisable(GL_CULL_FACE);
+    for (int i=0;i<2;++i) {
+        if (!handMaskValid_[i]) continue;
+        const auto& mesh=handMasks_[i];
+        if (!handMaskVao_[i]) {
+            glGenVertexArrays(1,&handMaskVao_[i]); glBindVertexArray(handMaskVao_[i]);
+            glGenBuffers(1,&handMaskVbo_[i]); glBindBuffer(GL_ARRAY_BUFFER,handMaskVbo_[i]);
+            glEnableVertexAttribArray(0); glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,sizeof(XrVector3f),nullptr);
+            glGenBuffers(1,&handMaskEbo_[i]); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,handMaskEbo_[i]);
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER,mesh.Indices().size()*sizeof(uint16_t),mesh.Indices().data(),GL_STATIC_DRAW);
+        } else glBindVertexArray(handMaskVao_[i]);
+        if (!handMaskUploaded_[i]) {
+            glBindBuffer(GL_ARRAY_BUFFER,handMaskVbo_[i]);
+            glBufferData(GL_ARRAY_BUFFER,mesh.Vertices().size()*sizeof(XrVector3f),mesh.Vertices().data(),GL_STREAM_DRAW);
+            handMaskUploaded_[i]=true;
+        }
+        glDrawElements(GL_TRIANGLES,static_cast<GLsizei>(mesh.Indices().size()),GL_UNSIGNED_SHORT,nullptr);
+        if (eye==1 && ++handMaskFrames_[i] % 600 == 1) {
+            LOGI("Real hand passthrough mask drawn in both eyes: %s frames=%u",i?"right":"left",handMaskFrames_[i]);
+        }
+    }
+    glBindVertexArray(0); glBindBuffer(GL_ARRAY_BUFFER,0); glUseProgram(0);
 }
 
 void XrApp::BlitVideoToSwapchain(int eye)
@@ -4759,6 +4820,7 @@ const char* XrApp::ShellStatusText() const
 
 protocol::TrackingPacket XrApp::BuildTrackingPacket(XrTime predictedDisplayTime)
 {
+    for (int i=0;i<2;++i) handMaskValid_[i]=handMaskUploaded_[i]=false;
     for (auto& controller : shellControllers_)
     {
         controller.active = false;
@@ -4848,6 +4910,9 @@ protocol::TrackingPacket XrApp::BuildTrackingPacket(XrTime predictedDisplayTime)
             XrHandJointLocationsEXT locations = {XR_TYPE_HAND_JOINT_LOCATIONS_EXT};
             locations.jointCount = XR_HAND_JOINT_COUNT_EXT;
             locations.jointLocations = jointLocations;
+            XrHandTrackingScaleFB handScale{XR_TYPE_HAND_TRACKING_SCALE_FB};
+            handScale.currentOutput=1.f;
+            if (getHandMesh_) locations.next=&handScale;
 
             XrHandJointsLocateInfoEXT locateInfo = {XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT};
             locateInfo.baseSpace = appSpace_;
@@ -4855,6 +4920,8 @@ protocol::TrackingPacket XrApp::BuildTrackingPacket(XrTime predictedDisplayTime)
 
             XrResult locateResult =
                 xrLocateHandJointsEXT_(handTrackers_[hand], &locateInfo, &locations);
+            if (XR_SUCCEEDED(locateResult) && serverMixedRealityPassthroughEnabled_ && getHandMesh_)
+                handMaskValid_[hand] = handMasks_[hand].Skin(locations,handScale.currentOutput);
             const uint32_t validJointCount = CountValidHandJoints(jointLocations);
             const bool hasUsableJoints = HasUsableHandJoints(jointLocations);
             const bool runtimeActive = locations.isActive == XR_TRUE;

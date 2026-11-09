@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 /** Opt-in single exposures over authenticated local ADB. Never runs on the XR frame thread. */
 final class StationCamera implements AutoCloseable {
@@ -40,6 +41,13 @@ final class StationCamera implements AutoCloseable {
   private ImageReader reader;
   private String cameraId;
   private Rect active;
+  private JSONObject lightOptics;
+  private static JSONArray components(float[] values) throws org.json.JSONException {
+    if (values == null) return null;
+    JSONArray out = new JSONArray();
+    for (float value : values) out.put((double)value);
+    return out;
+  }
   private boolean disableDistortion;
   private CaptureRequest preview;
   private Shot pending;
@@ -82,6 +90,10 @@ final class StationCamera implements AutoCloseable {
         if (sizes == null || !Arrays.asList(sizes).contains(new Size(W, H)))
           continue;
         cameraId = id;
+        lightOptics = new JSONObject();
+        lightOptics.put("intrinsics", components(c.get(CameraCharacteristics.LENS_INTRINSIC_CALIBRATION)));
+        lightOptics.put("sensor_to_camera", components(c.get(CameraCharacteristics.LENS_POSE_ROTATION)));
+        lightOptics.put("camera_position", components(c.get(CameraCharacteristics.LENS_POSE_TRANSLATION)));
         active = c.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
         int[] modes = c.get(CameraCharacteristics.DISTORTION_CORRECTION_AVAILABLE_MODES);
         if (modes != null)
@@ -213,6 +225,11 @@ final class StationCamera implements AutoCloseable {
             m.put("width", W);
             m.put("height", H);
             m.put("timestamp_ns", t);
+            JSONObject light = new JSONObject(lightOptics.toString());
+            light.put("exposure_ns", res.get(CaptureResult.SENSOR_EXPOSURE_TIME));
+            light.put("iso", res.get(CaptureResult.SENSOR_SENSITIVITY));
+            light.put("aperture", res.get(CaptureResult.LENS_APERTURE));
+            m.put("photometry", light);
             m.put("crop", crop == null ? "unknown" : crop.flattenToString());
             m.put("distortion", String.valueOf(res.get(CaptureResult.DISTORTION_CORRECTION_MODE)));
             m.put("focus", String.valueOf(res.get(CaptureResult.LENS_FOCUS_DISTANCE)));

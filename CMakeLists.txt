@@ -188,6 +188,8 @@ add_executable(oxrsys_runtime_tests
     tests/TestVulkanDispatch.cpp
     tests/TestCompositionLayerAlpha.cpp
     tests/TestProtocolLayout.cpp
+    tests/TestQuestHandMask.cpp
+    clients/android-vr/app/src/main/cpp/QuestHandMask.cpp
     tests/TestQuestPassthroughAlphaPolicy.cpp
     tests/TestQuestShellInteraction.cpp
     clients/android-vr/app/src/main/cpp/HeadsetAudioBuffer.cpp

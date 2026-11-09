@@ -70,6 +70,8 @@ global `passthrough_enabled` setting from headset-reported `passthrough_supporte
 
 USB diagnostics use Android's official `UsbManager` host-device intents and filters. The app requests app-level USB permission only when Android exposes a real USB device to the headset. ADB reverse streaming itself does not require or produce that app permission dialog; it may instead trigger the headset's USB debugging authorization prompt when the Mac is first authorized for ADB.
 
+For streamed video using black-key passthrough, the client uses Meta hand meshes (`XR_FB_hand_tracking_mesh`) and the current tracked joints to reveal the real hands over the video in each eye. When tracking is lost the mask drops out. To verify on a headset, pass each hand in front of a virtual object, then move it out of view and check that its silhouette clears.
+
 ## Display Refresh
 
 The runtime announces the preferred display refresh selected in Home/config. The Android client
@@ -293,6 +295,8 @@ adb -s SERIAL shell am start -n net.demonixis.oxrsys.android/com.oculus.NativeAc
 Run the operator's station client on the paired computer. A single authorized USB or wireless ADB connection is sufficient. The activity starts the Camera2 session only when explicitly requested and foregrounded. To stop, use the same activity command with `--ez oxrsys_relock false`. Camera access also stops on pause. [Human Touch rehearsal worker and physical setup](https://github.com/zzfadi/geotech-robotics-hackathon/blob/main/docs/quest-look-to-relock.md)
 
 **Snapshot protocol.** Forward an ephemeral local TCP port with `adb -s SERIAL forward tcp:0 localabstract:oxrsys_station_camera_v1`. Open a new connection for each observation and write byte 1. The response starts with a four-byte big-endian unsigned JSON header length followed by its UTF-8 JSON. On success the header contains version 1, camera ID, dimensions, build, crop, distortion mode, focus and `timestamp_ns`. Read exactly 1,843,200 bytes of row-packed I420 (Y, U, V). An error header contains `error` and has no image. A requested photograph is delivered only when its sensor timestamp matches the requested capture's result. The head-pose association and metric station checks belong to the host. The endpoint admits local adbd shell or root peers, operates on demand, and retains no image files. Remove the forward when finished.
+
+Snapshots can include a `photometry` object. The `intrinsics`, `sensor_to_camera` and `camera_position` fields describe the camera. The `exposure_ns`, `iso` and `aperture` fields describe this exposure. Availability depends on the device. Do not include per-frame exposure values in lens identity checks.
 
 **Verification.** From the repository root, run the following with JDK 17. It tests out-of-order exposure pairing and planar/interleaved YUV row handling. On hardware, verify that camera access, the optical watcher and the passthrough compositor work together, and that pausing the app closes the endpoint.
 
